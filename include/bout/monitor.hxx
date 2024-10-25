@@ -33,7 +33,7 @@ class Monitor {
 public:
   /// A \p timestep_ of -1 defaults to the the frequency of the BOUT++
   /// output monitor
-  Monitor(BoutReal timestep_ = -1) : timestep(timestep_){};
+  Monitor(BoutReal timestep_ = -1) : timestep(timestep_) {};
 
   virtual ~Monitor() = default;
 
@@ -48,7 +48,7 @@ public:
   virtual int call(Solver* solver, BoutReal time, int iter, int nout) = 0;
 
   /// Callback function for when a clean shutdown is initiated
-  virtual void cleanup(){};
+  virtual void cleanup() {};
 
   virtual void outputVars([[maybe_unused]] Options& options,
                           [[maybe_unused]] const std::string& time_dimension) {}
@@ -86,10 +86,18 @@ public:
 
   /// number of RHS calls
   int ncalls = 0;
-  /// number of RHS calls for fast timescale
+  /// number of RHS calls for explicit timescale
   int ncalls_e = 0;
-  /// number of RHS calls for slow timescale
+  /// number of RHS calls for implicit timescale
   int ncalls_i = 0;
+  /// number of RHS calls for slow explicit timescale
+  int ncalls_se = 0;
+  /// number of RHS calls for slow implicit timescale
+  int ncalls_si = 0;
+  /// number of RHS calls for fast explicit timescale
+  int ncalls_fe = 0;
+  /// number of RHS calls for fast implicit timescale
+  int ncalls_fi = 0;
 
   /// wall time spent calculating RHS
   BoutReal wtime_rhs = 0;
@@ -122,7 +130,7 @@ public:
   /*!
    * Write job progress to screen
    */
-  void writeProgress(BoutReal simtime, bool output_split);
+  void writeProgress(BoutReal simtime, bool output_split, bool output_splitmri);
 };
 
 #endif // BOUT_MONITOR_H

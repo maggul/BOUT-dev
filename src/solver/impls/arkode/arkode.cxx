@@ -335,9 +335,9 @@ int ArkodeSolver::init() {
     throw BoutException("Invalid adap_method\n");
   }
 
-  if (ARKStepSetAdaptivityMethod(arkode_mem, adap_method_int, 1, 1, nullptr)
+  if (ARKodeSetAdaptivityMethod(arkode_mem, adap_method_int, 1, 1, nullptr)
       != ARK_SUCCESS) {
-    throw BoutException("ARKStepSetAdaptivityMethod failed\n");
+    throw BoutException("ARKodeSetAdaptivityMethod failed\n");
   }
 #endif
 
@@ -527,6 +527,7 @@ int ArkodeSolver::run() {
     }
 
     // Get additional diagnostics
+    long int temp_long_int = 0;
     long int temp_long_int = 0;
     ARKodeGetNumSteps(arkode_mem, &temp_long_int);
     nsteps = int(temp_long_int);
