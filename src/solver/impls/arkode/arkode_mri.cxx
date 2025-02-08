@@ -165,6 +165,12 @@ ArkodeMRISolver::~ArkodeMRISolver() {
   MRIStepInnerStepper_Free(&inner_stepper);
 }
 
+BoutReal ArkodeMRISolver::getCurrentTimestep() {
+  BoutReal hcur;
+  ARKodeGetCurrentStep(arkode_mem, &hcur);
+  return hcur;
+}
+
 /**************************************************************************
  * Initialise
  **************************************************************************/
@@ -658,10 +664,6 @@ void ArkodeMRISolver::rhs_se(BoutReal t, BoutReal* udata, BoutReal* dudata) {
   // Load state from udata
   load_vars(udata);
 
-  // Get the current timestep
-  // TO DO: Check to identify which time step is needed current/last, then correct accordingly
-  ARKodeGetCurrentStep(arkode_mem, &hcur);
-
   // Call RHS function
   run_rhs_se(t);
 
@@ -677,8 +679,6 @@ void ArkodeMRISolver::rhs_si(BoutReal t, BoutReal* udata, BoutReal* dudata) {
   TRACE("Running RHS: ArkodeMRISolver::rhs_si({:e})", t);
 
   load_vars(udata);
-  // TO DO: Check to identify which time step is needed current/last, then correct accordingly
-  ARKodeGetCurrentStep(arkode_mem, &hcur);
   // Call Implicit RHS function
   run_rhs_si(t);
   save_derivs(dudata);
@@ -693,10 +693,6 @@ void ArkodeMRISolver::rhs_fe(BoutReal t, BoutReal* udata, BoutReal* dudata) {
 
   // Load state from udata
   load_vars(udata);
-
-  // Get the current timestep
-  // TO DO: Check to identify which time step is needed current/last, then correct accordingly
-  ARKodeGetCurrentStep(arkode_mem, &hcur);
 
   // Call RHS function
   run_rhs_fe(t);
@@ -713,8 +709,6 @@ void ArkodeMRISolver::rhs_fi(BoutReal t, BoutReal* udata, BoutReal* dudata) {
   TRACE("Running RHS: ArkodeMRISolver::rhs_si({:e})", t);
 
   load_vars(udata);
-  // TO DO: Check to identify which time step is needed current/last, then correct accordingly
-  ARKodeGetCurrentStep(arkode_mem, &hcur);
   // Call Implicit RHS function
   run_rhs_fi(t);
   save_derivs(dudata);
@@ -729,10 +723,6 @@ void ArkodeMRISolver::rhs_s(BoutReal t, BoutReal* udata, BoutReal* dudata) {
 
   // Load state from udata
   load_vars(udata);
-
-  // Get the current timestep
-  // TO DO: Check to identify which time step is needed current/last, then correct accordingly
-  ARKodeGetCurrentStep(arkode_mem, &hcur);
 
   // Call RHS function
   // run_rhs_s(t);
@@ -751,10 +741,6 @@ void ArkodeMRISolver::rhs_f(BoutReal t, BoutReal* udata, BoutReal* dudata) {
 
   // Load state from udata
   load_vars(udata);
-
-  // Get the current timestep
-  // Note: ARKodeGetCurrentStep updated too late in older versions
-  ARKodeGetCurrentStep(arkode_mem, &hcur);
 
   // Call RHS function
   // run_rhs_f(t);
