@@ -5,7 +5,7 @@
  * NOTE: Only one solver can currently be compiled in
  *
  **************************************************************************
- * Copyright 2010-2024 BOUT++ contributors
+ * Copyright 2010-2025 BOUT++ contributors
  *
  * Contact: Ben Dudson, dudson2@llnl.gov
  *
@@ -36,18 +36,29 @@
 
 namespace {
 RegisterUnavailableSolver
-    registerunavailablearkodemri("arkode_mri", "BOUT++ was not configured with ARKODE/SUNDIALS");
+    registerunavailablearkodemri("arkode_mri",
+                                 "BOUT++ was not configured with ARKODE/SUNDIALS");
 }
 
 #else
 
-#include "bout/bout_enum_class.hxx"
-#include "bout/bout_types.hxx"
 #include "bout/sundials_backports.hxx"
 
+#if SUNDIALS_VERSION_LESS_THAN(7, 2, 0)
+
+namespace {
+RegisterUnavailableSolver registerunavailablearkodemri(
+    "arkode_mri", "BOUT++ configured with ARKODE/SUNDIALS version less than 7.2.0");
+}
+
+#else // SUNDIALS_VERSION check
+
+#include "bout/bout_enum_class.hxx"
+#include "bout/bout_types.hxx"
+#include "bout/region.hxx"
+#include <arkode/arkode_mristep.h>
 #include <nvector/nvector_parallel.h>
 #include <sundials/sundials_config.h>
-#include <arkode/arkode_mristep.h>
 
 #include <vector>
 
@@ -82,9 +93,9 @@ public:
   void rhs_s(BoutReal t, BoutReal* udata, BoutReal* dudata);
   void rhs_f(BoutReal t, BoutReal* udata, BoutReal* dudata);
   void pre_s(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal* udata, BoutReal* rvec,
-           BoutReal* zvec);
+             BoutReal* zvec);
   void pre_f(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal* udata, BoutReal* rvec,
-           BoutReal* zvec);
+             BoutReal* zvec);
   void jac_s(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutReal* Jvdata);
   void jac_f(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutReal* Jvdata);
 
@@ -93,9 +104,9 @@ private:
 
   bool diagnose{false}; //< Output additional diagnostics
 
-  N_Vector uvec{nullptr};    //< Values
-  void* arkode_mem{nullptr}; //< ARKODE internal memory block
-  void* inner_arkode_mem{nullptr}; //< ARKODE internal memory block
+  N_Vector uvec{nullptr};                     //< Values
+  void* arkode_mem{nullptr};                  //< ARKODE internal memory block
+  void* inner_arkode_mem{nullptr};            //< ARKODE internal memory block
   MRIStepInnerStepper inner_stepper{nullptr}; //< inner stepper
 
   BoutReal pre_Wtime_s{0.0}; //< Time in preconditioner
@@ -164,5 +175,10 @@ private:
   sundials::Context suncontext;
 };
 
+<<<<<<< HEAD
+=======
+#endif // SUNDIALS_VERSION CHECK
+>>>>>>> 30c16d9141 (ARKode-MRI: Register unavailable if sundials version is too low)
+#endif // SUNDIALS_VERSION CHECK
 #endif // BOUT_HAS_ARKODE
 #endif // BOUT_ARKODE_MRI_SOLVER_H
