@@ -4,7 +4,7 @@
  * NOTE: ARKode is still in beta testing so use with cautious optimism
  *
  **************************************************************************
- * Copyright 2010-2024 BOUT++ contributors
+ * Copyright 2010-2025 BOUT++ contributors
  *
  * This file is part of BOUT++.
  *
@@ -60,13 +60,13 @@ int arkode_s_rhs(BoutReal t, N_Vector u, N_Vector du, void* user_data);
 int arkode_f_rhs(BoutReal t, N_Vector u, N_Vector du, void* user_data);
 
 int arkode_s_bbd_rhs(sunindextype Nlocal, BoutReal t, N_Vector u, N_Vector du,
-                   void* user_data);
+                     void* user_data);
 int arkode_f_bbd_rhs(sunindextype Nlocal, BoutReal t, N_Vector u, N_Vector du,
-                   void* user_data);                   
+                     void* user_data);
 int arkode_s_pre(BoutReal t, N_Vector yy, N_Vector yp, N_Vector rvec, N_Vector zvec,
-               BoutReal gamma, BoutReal delta, int lr, void* user_data);
+                 BoutReal gamma, BoutReal delta, int lr, void* user_data);
 int arkode_f_pre(BoutReal t, N_Vector yy, N_Vector yp, N_Vector rvec, N_Vector zvec,
-               BoutReal gamma, BoutReal delta, int lr, void* user_data);
+                 BoutReal gamma, BoutReal delta, int lr, void* user_data);
 
 } // namespace
 // NOLINTEND(readability-identifier-length)
@@ -82,10 +82,11 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
                     .doc("Use default capability (imex) or provide a specific treatment: "
                          "implicit or explicit")
                     .withDefault(MRI_Treatment::ImEx)),
-      inner_treatment((*options)["inner_treatment"]
-                    .doc("Use default capability (imex) or provide a specific inner_treatment: "
-                         "implicit or explicit")
-                    .withDefault(MRI_Treatment::ImEx)),
+      inner_treatment(
+          (*options)["inner_treatment"]
+              .doc("Use default capability (imex) or provide a specific inner_treatment: "
+                   "implicit or explicit")
+              .withDefault(MRI_Treatment::ImEx)),
       set_linear(
           (*options)["set_linear"]
               .doc("Use linear implicit solver (only evaluates jacobian inversion once)")
@@ -95,12 +96,14 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
               .doc("Use linear implicit solver (only evaluates jacobian inversion once)")
               .withDefault(false)),
       fixed_step((*options)["fixed_step"]
-                     .doc("Solve both fast and slow time scales using fixed time step sizes. NOTE: This is "
+                     .doc("Solve both fast and slow time scales using fixed time step "
+                          "sizes. NOTE: This is "
                           "not recommended except for code comparison")
                      .withDefault(false)),
       inner_timestep((*options)["inner_timestep"]
-                     .doc("Fixed step size to use for inner solver when running in fixed time step mode.")
-                     .withDefault(1.0e-4)),
+                         .doc("Fixed step size to use for inner solver when running in "
+                              "fixed time step mode.")
+                         .withDefault(1.0e-4)),
       order((*options)["order"].doc("Order of internal step").withDefault(3)),
       abstol((*options)["atol"].doc("Absolute tolerance").withDefault(1.0e-12)),
       reltol((*options)["rtol"].doc("Relative tolerance").withDefault(1.0e-10)),
@@ -111,12 +114,13 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
                      .doc("Use user-supplied preconditioner function")
                      .withDefault(false)),
       inner_use_precon((*options)["inner_use_precon"]
-                     .doc("Use user-supplied preconditioner function")
-                     .withDefault(false)),
+                           .doc("Use user-supplied preconditioner function")
+                           .withDefault(false)),
       maxl(
           (*options)["maxl"].doc("Number of Krylov basis vectors to use").withDefault(0)),
-      inner_maxl(
-          (*options)["inner_maxl"].doc("Number of Krylov basis vectors to use").withDefault(0)),
+      inner_maxl((*options)["inner_maxl"]
+                     .doc("Number of Krylov basis vectors to use")
+                     .withDefault(0)),
       rightprec((*options)["rightprec"]
                     .doc("Use right preconditioning instead of left preconditioning")
                     .withDefault(false)),
@@ -125,7 +129,8 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
 
   // Add diagnostics to output
   add_int_diagnostic(nsteps, "arkode_nsteps", "Cumulative number of internal steps");
-  add_int_diagnostic(inner_nsteps, "arkode_inner_nsteps", "Cumulative number of inner internal steps");
+  add_int_diagnostic(inner_nsteps, "arkode_inner_nsteps",
+                     "Cumulative number of inner internal steps");
   add_int_diagnostic(nfe_evals, "arkode_nfe_evals",
                      "No. of calls to fe (explicit portion of the right-hand-side "
                      "function) function");
@@ -139,11 +144,14 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
                      "No. of calls to fi (implicit portion of inner the right-hand-side "
                      "function) function");
   add_int_diagnostic(nniters, "arkode_nniters", "No. of nonlinear solver iterations");
-  add_int_diagnostic(inner_nniters, "arkode_inner_nniters", "No. of inner nonlinear solver iterations");
+  add_int_diagnostic(inner_nniters, "arkode_inner_nniters",
+                     "No. of inner nonlinear solver iterations");
   add_int_diagnostic(npevals, "arkode_npevals", "No. of preconditioner evaluations");
-  add_int_diagnostic(inner_npevals, "arkode_inner_npevals", "No. of inner preconditioner evaluations");
+  add_int_diagnostic(inner_npevals, "arkode_inner_npevals",
+                     "No. of inner preconditioner evaluations");
   add_int_diagnostic(nliters, "arkode_nliters", "No. of linear iterations");
-  add_int_diagnostic(inner_nliters, "arkode_inner_nliters", "No. of inner linear iterations");
+  add_int_diagnostic(inner_nliters, "arkode_inner_nliters",
+                     "No. of inner linear iterations");
 }
 
 ArkodeMRISolver::~ArkodeMRISolver() {
@@ -192,18 +200,19 @@ int ArkodeMRISolver::init() {
 
   switch (inner_treatment) {
   case MRI_Treatment::ImEx:
-    inner_arkode_mem = callWithSUNContext(ARKStepCreate, suncontext, arkode_rhs_f_explicit,
-                                    arkode_rhs_f_implicit, simtime, uvec);
+    inner_arkode_mem =
+        callWithSUNContext(ARKStepCreate, suncontext, arkode_rhs_f_explicit,
+                           arkode_rhs_f_implicit, simtime, uvec);
     output_info.write("\tUsing ARKode ImEx inner solver \n");
     break;
   case MRI_Treatment::Explicit:
-    inner_arkode_mem =
-        callWithSUNContext(ARKStepCreate, suncontext, arkode_f_rhs, nullptr, simtime, uvec);
+    inner_arkode_mem = callWithSUNContext(ARKStepCreate, suncontext, arkode_f_rhs,
+                                          nullptr, simtime, uvec);
     output_info.write("\tUsing ARKode Explicit inner solver \n");
     break;
   case MRI_Treatment::Implicit:
-    inner_arkode_mem =
-        callWithSUNContext(ARKStepCreate, suncontext, nullptr, arkode_f_rhs, simtime, uvec);
+    inner_arkode_mem = callWithSUNContext(ARKStepCreate, suncontext, nullptr,
+                                          arkode_f_rhs, simtime, uvec);
     output_info.write("\tUsing ARKode Implicit inner solver \n");
     break;
   default:
@@ -218,7 +227,7 @@ int ArkodeMRISolver::init() {
     throw BoutException("ARKodeSetUserData failed\n");
   }
 
-  if(inner_treatment != MRI_Treatment::Explicit)
+  if (inner_treatment != MRI_Treatment::Explicit)
     if (ARKodeSetLinear(inner_arkode_mem, inner_set_linear) != ARK_SUCCESS) {
       throw BoutException("ARKodeSetLinear failed\n");
     }
@@ -245,12 +254,12 @@ int ArkodeMRISolver::init() {
 
   switch (treatment) {
   case MRI_Treatment::ImEx:
-    arkode_mem = callWithSUNContext(MRIStepCreate, suncontext, arkode_rhs_s_explicit, arkode_rhs_s_implicit, 
-                                    simtime, uvec, inner_stepper);
+    arkode_mem = callWithSUNContext(MRIStepCreate, suncontext, arkode_rhs_s_explicit,
+                                    arkode_rhs_s_implicit, simtime, uvec, inner_stepper);
     output_info.write("\tUsing ARKode ImEx solver \n");
     break;
   case MRI_Treatment::Explicit:
-    arkode_mem = callWithSUNContext(MRIStepCreate, suncontext, arkode_s_rhs, nullptr, 
+    arkode_mem = callWithSUNContext(MRIStepCreate, suncontext, arkode_s_rhs, nullptr,
                                     simtime, uvec, inner_stepper);
     output_info.write("\tUsing ARKode Explicit solver \n");
     break;
@@ -271,7 +280,7 @@ int ArkodeMRISolver::init() {
     throw BoutException("ARKodeSetUserData failed\n");
   }
 
-  if(treatment != MRI_Treatment::Explicit)
+  if (treatment != MRI_Treatment::Explicit)
     if (ARKodeSetLinear(arkode_mem, set_linear) != ARK_SUCCESS) {
       throw BoutException("ARKodeSetLinear failed\n");
     }
@@ -341,31 +350,34 @@ int ArkodeMRISolver::init() {
     throw BoutException("ARKodeSetMaxNumSteps failed\n");
   }
 
-  if (inner_treatment == MRI_Treatment::ImEx or inner_treatment == MRI_Treatment::Implicit) {
+  if (inner_treatment == MRI_Treatment::ImEx
+      or inner_treatment == MRI_Treatment::Implicit) {
     {
       output.write("\tUsing Newton iteration for inner solver\n");
 
       const auto prectype =
           inner_use_precon ? (rightprec ? SUN_PREC_RIGHT : SUN_PREC_LEFT) : SUN_PREC_NONE;
-      inner_sun_solver = callWithSUNContext(SUNLinSol_SPGMR, suncontext, uvec, prectype, inner_maxl);
+      inner_sun_solver =
+          callWithSUNContext(SUNLinSol_SPGMR, suncontext, uvec, prectype, inner_maxl);
       if (inner_sun_solver == nullptr) {
         throw BoutException("Creating SUNDIALS inner linear solver failed\n");
       }
-      if (ARKodeSetLinearSolver(inner_arkode_mem, inner_sun_solver, nullptr) != ARKLS_SUCCESS) {
+      if (ARKodeSetLinearSolver(inner_arkode_mem, inner_sun_solver, nullptr)
+          != ARKLS_SUCCESS) {
         throw BoutException("ARKodeSetLinearSolver failed for inner solver\n");
       }
 
       /// Set Preconditioner
       if (inner_use_precon) {
-        if (hasPreconditioner()) {  // change to inner_hasPreconditioner when it is available
-          output.write("\tUsing user-supplied preconditioner for inner solver\n");
+        if (hasPreconditionerFast()) {
+          output.write("\tUsing user-supplied preconditioner for inner (fast) solver\n");
 
           if (ARKodeSetPreconditioner(inner_arkode_mem, nullptr, arkode_f_pre)
               != ARKLS_SUCCESS) {
             throw BoutException("ARKodeSetPreconditioner failed for inner solver\n");
           }
         } else {
-          output.write("\tUsing BBD preconditioner for inner solver\n");
+          output.write("\tUsing BBD preconditioner for inner (fast) solver\n");
 
           /// Get options
           // Compute band_width_default from actually added fields, to allow for multiple
@@ -410,9 +422,9 @@ int ArkodeMRISolver::init() {
     }
 
     /// Set Jacobian-vector multiplication function
-    output.write("\tUsing difference quotient approximation for Jacobian in the inner solver\n");
+    output.write(
+        "\tUsing difference quotient approximation for Jacobian in the inner solver\n");
   }
-
 
   if (treatment == MRI_Treatment::ImEx or treatment == MRI_Treatment::Implicit) {
     {
@@ -430,7 +442,7 @@ int ArkodeMRISolver::init() {
 
       /// Set Preconditioner
       if (use_precon) {
-        if (hasPreconditioner()) {
+        if (hasPreconditionerSlow()) {
           output.write("\tUsing user-supplied preconditioner\n");
 
           if (ARKodeSetPreconditioner(arkode_mem, nullptr, arkode_s_pre)
@@ -536,7 +548,8 @@ int ArkodeMRISolver::run() {
     ARKodeGetNumRhsEvals(inner_arkode_mem, 1, &temp_long_int2);
     inner_nfe_evals = int(temp_long_int);
     inner_nfi_evals = int(temp_long_int2);
-    if (inner_treatment == MRI_Treatment::ImEx or inner_treatment == MRI_Treatment::Implicit) {
+    if (inner_treatment == MRI_Treatment::ImEx
+        or inner_treatment == MRI_Treatment::Implicit) {
       ARKodeGetNumNonlinSolvIters(inner_arkode_mem, &temp_long_int);
       inner_nniters = int(temp_long_int);
       ARKodeGetNumPrecEvals(inner_arkode_mem, &temp_long_int);
@@ -558,16 +571,22 @@ int ArkodeMRISolver::run() {
                      static_cast<BoutReal>(npevals) / static_cast<BoutReal>(nniters));
       }
 
-      output.write("\nARKODE Inner: inner_nsteps {:d}, inner_nfe_evals {:d}, inner_nfi_evals {:d}, inner_nniters {:d}, "
+      output.write("\nARKODE Inner: inner_nsteps {:d}, inner_nfe_evals {:d}, "
+                   "inner_nfi_evals {:d}, inner_nniters {:d}, "
                    "inner_npevals {:d}, inner_nliters {:d}\n",
-                   inner_nsteps, inner_nfe_evals, inner_nfi_evals, inner_nniters, inner_npevals, inner_nliters);
-      if (inner_treatment == MRI_Treatment::ImEx or inner_treatment == MRI_Treatment::Implicit) {
+                   inner_nsteps, inner_nfe_evals, inner_nfi_evals, inner_nniters,
+                   inner_npevals, inner_nliters);
+      if (inner_treatment == MRI_Treatment::ImEx
+          or inner_treatment == MRI_Treatment::Implicit) {
         output.write("    -> Inner Newton iterations per step: {:e}\n",
-                     static_cast<BoutReal>(inner_nniters) / static_cast<BoutReal>(inner_nsteps));
+                     static_cast<BoutReal>(inner_nniters)
+                         / static_cast<BoutReal>(inner_nsteps));
         output.write("    -> Inner Linear iterations per Newton iteration: {:e}\n",
-                     static_cast<BoutReal>(inner_nliters) / static_cast<BoutReal>(inner_nniters));
+                     static_cast<BoutReal>(inner_nliters)
+                         / static_cast<BoutReal>(inner_nniters));
         output.write("    -> Inner Preconditioner evaluations per Newton: {:e}\n",
-                     static_cast<BoutReal>(inner_npevals) / static_cast<BoutReal>(inner_nniters));
+                     static_cast<BoutReal>(inner_npevals)
+                         / static_cast<BoutReal>(inner_nniters));
       }
     }
 
@@ -750,12 +769,12 @@ void ArkodeMRISolver::rhs_f(BoutReal t, BoutReal* udata, BoutReal* dudata) {
  **************************************************************************/
 
 void ArkodeMRISolver::pre_s(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal* udata,
-                       BoutReal* rvec, BoutReal* zvec) {
+                            BoutReal* rvec, BoutReal* zvec) {
   TRACE("Running preconditioner: ArkodeMRISolver::pre({:e})", t);
 
   const BoutReal tstart = bout::globals::mpi->MPI_Wtime();
 
-  if (!hasPreconditioner()) {
+  if (!hasPreconditionerSlow()) {
     // Identity (but should never happen)
     const auto length = N_VGetLocalLength_Parallel(uvec);
     std::copy(rvec, rvec + length, zvec);
@@ -768,7 +787,7 @@ void ArkodeMRISolver::pre_s(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal
   // Load vector to be inverted into F_vars
   load_derivs(rvec);
 
-  runPreconditioner(t, gamma, delta);
+  runPreconditionerSlow(t, gamma, delta);
 
   // Save the solution from F_vars
   save_derivs(zvec);
@@ -778,12 +797,12 @@ void ArkodeMRISolver::pre_s(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal
 }
 
 void ArkodeMRISolver::pre_f(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal* udata,
-                       BoutReal* rvec, BoutReal* zvec) {
+                            BoutReal* rvec, BoutReal* zvec) {
   TRACE("Running preconditioner: ArkodeMRISolver::pre({:e})", t);
 
   const BoutReal tstart = bout::globals::mpi->MPI_Wtime();
 
-  if (!hasPreconditioner()) {
+  if (!hasPreconditionerFast()) {
     // Identity (but should never happen)
     const auto length = N_VGetLocalLength_Parallel(uvec);
     std::copy(rvec, rvec + length, zvec);
@@ -796,7 +815,7 @@ void ArkodeMRISolver::pre_f(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal
   // Load vector to be inverted into F_vars
   load_derivs(rvec);
 
-  runPreconditioner(t, gamma, delta);
+  runPreconditionerFast(t, gamma, delta);
 
   // Save the solution from F_vars
   save_derivs(zvec);
@@ -809,7 +828,8 @@ void ArkodeMRISolver::pre_f(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal
  * Jacobian-vector multiplication functions
  **************************************************************************/
 
-void ArkodeMRISolver::jac_s(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutReal* Jvdata) {
+void ArkodeMRISolver::jac_s(BoutReal t, BoutReal* ydata, BoutReal* vdata,
+                            BoutReal* Jvdata) {
   TRACE("Running Jacobian: ArkodeMRISolver::jac({:e})", t);
 
   if (not hasJacobian()) {
@@ -829,7 +849,8 @@ void ArkodeMRISolver::jac_s(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutRe
   save_derivs(Jvdata);
 }
 
-void ArkodeMRISolver::jac_f(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutReal* Jvdata) {
+void ArkodeMRISolver::jac_f(BoutReal t, BoutReal* ydata, BoutReal* vdata,
+                            BoutReal* Jvdata) {
   TRACE("Running Jacobian: ArkodeMRISolver::jac({:e})", t);
 
   if (not hasJacobian()) {
@@ -953,18 +974,19 @@ int arkode_f_rhs(BoutReal t, N_Vector u, N_Vector du, void* user_data) {
 
 /// RHS function for BBD preconditioner
 int arkode_s_bbd_rhs(sunindextype UNUSED(Nlocal), BoutReal t, N_Vector u, N_Vector du,
-                   void* user_data) {
+                     void* user_data) {
   return arkode_rhs_s_implicit(t, u, du, user_data);
 }
 
 int arkode_f_bbd_rhs(sunindextype UNUSED(Nlocal), BoutReal t, N_Vector u, N_Vector du,
-                   void* user_data) {
+                     void* user_data) {
   return arkode_rhs_f_implicit(t, u, du, user_data);
 }
 
 /// Preconditioner function
-int arkode_s_pre(BoutReal t, N_Vector yy, N_Vector UNUSED(yp), N_Vector rvec, N_Vector zvec,
-               BoutReal gamma, BoutReal delta, int UNUSED(lr), void* user_data) {
+int arkode_s_pre(BoutReal t, N_Vector yy, N_Vector UNUSED(yp), N_Vector rvec,
+                 N_Vector zvec, BoutReal gamma, BoutReal delta, int UNUSED(lr),
+                 void* user_data) {
   BoutReal* udata = N_VGetArrayPointer(yy);
   BoutReal* rdata = N_VGetArrayPointer(rvec);
   BoutReal* zdata = N_VGetArrayPointer(zvec);
@@ -977,8 +999,9 @@ int arkode_s_pre(BoutReal t, N_Vector yy, N_Vector UNUSED(yp), N_Vector rvec, N_
   return 0;
 }
 
-int arkode_f_pre(BoutReal t, N_Vector yy, N_Vector UNUSED(yp), N_Vector rvec, N_Vector zvec,
-               BoutReal gamma, BoutReal delta, int UNUSED(lr), void* user_data) {
+int arkode_f_pre(BoutReal t, N_Vector yy, N_Vector UNUSED(yp), N_Vector rvec,
+                 N_Vector zvec, BoutReal gamma, BoutReal delta, int UNUSED(lr),
+                 void* user_data) {
   BoutReal* udata = N_VGetArrayPointer(yy);
   BoutReal* rdata = N_VGetArrayPointer(rvec);
   BoutReal* zdata = N_VGetArrayPointer(zvec);
@@ -999,8 +1022,8 @@ int arkode_f_pre(BoutReal t, N_Vector yy, N_Vector UNUSED(yp), N_Vector rvec, N_
  **************************************************************************/
 
 void ArkodeMRISolver::set_abstol_values(BoutReal* abstolvec_data,
-                                     std::vector<BoutReal>& f2dtols,
-                                     std::vector<BoutReal>& f3dtols) {
+                                        std::vector<BoutReal>& f2dtols,
+                                        std::vector<BoutReal>& f3dtols) {
   int p = 0; // Counter for location in abstolvec_data array
 
   // All boundaries
@@ -1014,8 +1037,8 @@ void ArkodeMRISolver::set_abstol_values(BoutReal* abstolvec_data,
 }
 
 void ArkodeMRISolver::loop_abstol_values_op(Ind2D UNUSED(i2d), BoutReal* abstolvec_data,
-                                         int& p, std::vector<BoutReal>& f2dtols,
-                                         std::vector<BoutReal>& f3dtols, bool bndry) {
+                                            int& p, std::vector<BoutReal>& f2dtols,
+                                            std::vector<BoutReal>& f3dtols, bool bndry) {
   // Loop over 2D variables
   for (std::vector<BoutReal>::size_type i = 0; i < f2dtols.size(); i++) {
     if (bndry && !f2d[i].evolve_bndry) {
@@ -1037,4 +1060,6 @@ void ArkodeMRISolver::loop_abstol_values_op(Ind2D UNUSED(i2d), BoutReal* abstolv
   }
 }
 
-#endif
+#else
+#endif // SUNDIALS_VERSION CHECK
+#endif // BOUT_HAS_ARKODE
