@@ -115,6 +115,11 @@ private:
 
   /// Maximum number of steps to take between outputs
   int mxsteps;
+
+  // /// Maximum step sizes
+  // double mxstepsize;
+  // double inner_mxstepsize;
+
   /// Integrator treatment enum: IMEX, Implicit or Explicit
   MRI_Treatment treatment;
   MRI_Treatment inner_treatment;
@@ -171,10 +176,6 @@ private:
   sundials::Context suncontext;
 };
 
-<<<<<<< HEAD
-=======
-#endif // SUNDIALS_VERSION CHECK
->>>>>>> 30c16d9141 (ARKode-MRI: Register unavailable if sundials version is too low)
 #endif // SUNDIALS_VERSION CHECK
 #endif // BOUT_HAS_ARKODE
 #endif // BOUT_ARKODE_MRI_SOLVER_H
