@@ -133,6 +133,23 @@ CvodeSolver::CvodeSolver(Options* opts)
               .doc("Factor by which the Krylov linear solver’s convergence test constant "
                    "is reduced from the nonlinear solver test constant.")
               .withDefault(0.05)),
+      use_temporal_filtering((*options)["use_temporal_filtering"]
+                             .doc("Use temporal filtering of solution")
+                             .withDefault(false)),
+      temp_filtering(),
+      filtering_type((*options)["filtering_type"]
+                     .doc("Type of temporal filtering to perform: None, EMA, SRA")
+                     .withDefault(FilteringType::None)),
+      tau_mean((*options)["tau_mean"]
+                .doc("Interval over which means are calculated")
+                .withDefault(10.0)),
+      mean_start_time((*options)["mean_start_time"]
+                      .doc("Time at which averaging is allowed to start")
+                      .withDefault(0.0)),
+      lambda((*options)["lambda"]
+             .doc("Relaxation parameter for temporal filtering")
+             .withDefault(0.01)),
+
       suncontext(createSUNContext(BoutComm::get())) {
   has_constraints = false; // This solver doesn't have constraints
   canReset = true;
@@ -416,6 +433,14 @@ int CvodeSolver::init() {
     throw BoutException("CVodeSetEpsLin failed\n");
   }
 
+  // Enable temporal filtering if requested
+  if (use_temporal_filtering) {
+    output.write("\tUsing temporal filtering of solution\n");
+    temp_filtering.reset_state();
+    temp_filtering.initialize(uvec);
+    temp_filtering.configure(filtering_type, tau_mean, mean_start_time);
+  }
+
   cvode_initialised = true;
 
   return 0;
@@ -555,6 +580,7 @@ BoutReal CvodeSolver::run(BoutReal tout) {
   if (!monitor_timestep) {
     // Run in normal mode
     flag = CVode(cvode_mem, tout, uvec, &simtime, CV_NORMAL);
+    apply_temporal_filtering(simtime, uvec);
   } else {
     // Run in single step mode, to call timestep monitors
     BoutReal internal_time;
@@ -568,6 +594,7 @@ BoutReal CvodeSolver::run(BoutReal tout) {
         throw BoutException("ERROR CVODE solve failed at t = {:e}, flag = {:d}\n",
                             internal_time, flag);
       }
+      apply_temporal_filtering(internal_time, uvec);
 
       // Call timestep monitor
       call_timestep_monitors(internal_time, internal_time - last_time);
@@ -796,6 +823,45 @@ void CvodeSolver::resetInternalFields() {
 
   if (CVodeReInit(cvode_mem, simtime, uvec) != CV_SUCCESS) {
     throw BoutException("CVodeReInit failed\n");
+  }
+}
+
+void CvodeSolver::apply_temporal_filtering(BoutReal internal_time,
+                                            N_Vector uvec)
+{
+  if (!use_temporal_filtering) {
+    return;
+  }
+
+  // Update the temporal filtering 
+  temp_filtering.update(internal_time, uvec);
+
+  // If no mean is available yet, do nothing
+  if (!temp_filtering.has_mean()) {
+    return;
+  }
+
+  int flag;
+    
+  // Get the current mean vector
+  N_Vector u_mean = temp_filtering.get_mean_vector();
+
+  // Apply the temporal filtering
+  // Gently relax the solution towards the mean
+  // Set u = (1 - lambda) * u + lambda * u_mean
+  N_VLinearSum(1.0 - lambda, uvec, lambda, u_mean, uvec);
+
+  // Reset CVODE with the new filtered state
+  flag = CVodeReInit(cvode_mem, internal_time, uvec);
+  if (flag != CV_SUCCESS) {
+    throw BoutException("CVodeReInit failed in temporal filtering\n");
+  }
+
+  // For EMA: we keep averaging continuously (no reset).
+  // For SRA: enforce finite averaging windows of length tau_mean
+  // by restarting the averaging window when tau_mean_cur is equal to tau_mean
+  if (filtering_type == FilteringType::SRA && temp_filtering.window_full()) {
+    temp_filtering.restart_window(internal_time);
   }
 }
 

@@ -125,6 +125,12 @@ int main(int argc, char** argv) {
   root[sunsolver]["rtol"] = rtol;
   root[sunsolver]["atol"] = atol;
 
+  root[sunsolver]["use_temporal_filtering"] = true;
+  root[sunsolver]["tau_mean"] = 1.0;
+  root[sunsolver]["filtering_type"] = "ema";
+  root[sunsolver]["mean_start_time"] = 0.0;
+  root[sunsolver]["lambda"] = 10.0*rtol;
+
   // Get specific options section for this solver. Can't just use default
   // "solver" section, as we run into problems when solvers use the same
   // name for an option with inconsistent defaults

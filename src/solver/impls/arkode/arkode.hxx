@@ -45,6 +45,7 @@ RegisterUnavailableSolver
 #include "bout/bout_types.hxx"
 #include "bout/region.hxx"
 #include "bout/sundials_backports.hxx"
+#include "temporal_filtering.hxx"
 
 #include <nvector/nvector_parallel.h>
 #include <sundials/sundials_config.h>
@@ -181,6 +182,22 @@ private:
   bool rightprec;
   /// Use user-supplied Jacobian function
   bool use_jacobian;
+  /// Temporal filtering of solution
+  /// - Whether to use temporal filtering
+  bool use_temporal_filtering{false};
+  /// Temporal filtering object
+  TemporalFiltering temp_filtering;
+  /// Type of temporal filtering to use
+  FilteringType filtering_type{FilteringType::None};
+  /// Interval over which means are calculated
+  /// - EMA: time scale of the exponential memory
+  /// - SRA: window length of each running-average block
+  BoutReal tau_mean{0.0};
+  /// Time at which averaging starts
+  BoutReal mean_start_time{0.0};
+  /// Relaxation/nudging parameter for temporal filtering
+  BoutReal lambda{0.0};
+
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
   /// Use ARKode optimal parameters
   bool optimize;
@@ -199,7 +216,7 @@ private:
   void loop_abstol_values_op(Ind2D i2d, BoutReal* abstolvec_data, int& p,
                              std::vector<BoutReal>& f2dtols,
                              std::vector<BoutReal>& f3dtols, bool bndry);
-
+  void apply_temporal_filtering(BoutReal internal_time, N_Vector uvec);
   /// SPGMR solver structure
   SUNLinearSolver sun_solver{nullptr};
   /// Solver for implicit stages

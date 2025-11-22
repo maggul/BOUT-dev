@@ -132,6 +132,22 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
       rightprec((*options)["rightprec"]
                     .doc("Use right preconditioning instead of left preconditioning")
                     .withDefault(false)),
+      use_temporal_filtering((*options)["use_temporal_filtering"]
+                             .doc("Use temporal filtering of solution")
+                             .withDefault(false)),
+      temp_filtering(),
+      filtering_type((*options)["filtering_type"]
+                     .doc("Type of temporal filtering to perform: None, EMA, SRA")
+                     .withDefault(FilteringType::None)),
+      tau_mean((*options)["tau_mean"]
+                .doc("Interval over which means are calculated")
+                .withDefault(10.0)),
+      mean_start_time((*options)["mean_start_time"]
+                      .doc("Time at which averaging is allowed to start")
+                      .withDefault(0.0)),
+      lambda((*options)["lambda"]
+             .doc("Relaxation parameter for temporal filtering")
+             .withDefault(0.01)),
       suncontext(createSUNContext(BoutComm::get())) {
   has_constraints = false; // This solver doesn't have constraints
 
@@ -510,6 +526,14 @@ int ArkodeMRISolver::init() {
     output.write("\tUsing difference quotient approximation for Jacobian\n");
   }
 
+  // Enable temporal filtering if requested
+  if (use_temporal_filtering) {
+    output.write("\tUsing temporal filtering of solution\n");
+    temp_filtering.reset_state();
+    temp_filtering.initialize(uvec);
+    temp_filtering.configure(filtering_type, tau_mean, mean_start_time);
+  }
+
   return 0;
 }
 
@@ -629,6 +653,7 @@ BoutReal ArkodeMRISolver::run(BoutReal tout) {
   if (!monitor_timestep) {
     // Run in normal mode
     flag = ARKodeEvolve(arkode_mem, tout, uvec, &simtime, ARK_NORMAL);
+    apply_temporal_filtering(simtime, uvec);
   } else {
     // Run in single step mode, to call timestep monitors
     BoutReal internal_time;
@@ -643,6 +668,7 @@ BoutReal ArkodeMRISolver::run(BoutReal tout) {
                            internal_time, flag);
         return -1.0;
       }
+      apply_temporal_filtering(internal_time, uvec);
 
       // Call timestep monitor
       call_timestep_monitors(internal_time, internal_time - last_time);
@@ -1004,6 +1030,45 @@ void ArkodeMRISolver::loop_abstol_values_op(Ind2D UNUSED(i2d), BoutReal* abstolv
       abstolvec_data[p] = f3dtols[i];
       p++;
     }
+  }
+}
+
+void ArkodeMRISolver::apply_temporal_filtering(BoutReal internal_time,
+                                               N_Vector uvec)
+{
+  if (!use_temporal_filtering) {
+    return;
+  }
+
+  // Update the temporal filtering 
+  temp_filtering.update(internal_time, uvec);
+
+  // If no mean is available yet, do nothing
+  if (!temp_filtering.has_mean()) {
+    return;
+  }
+
+  int flag;
+    
+  // Get the current mean vector
+  N_Vector u_mean = temp_filtering.get_mean_vector();
+
+  // Apply the temporal filtering
+  // Gently relax the solution towards the mean
+  // Set u = (1 - lambda) * u + lambda * u_mean
+  N_VLinearSum(1.0 - lambda, uvec, lambda, u_mean, uvec);
+
+  // Reset ARKode with the new filtered state
+  flag = ARKodeReset(arkode_mem, internal_time, uvec);
+  if (flag != ARK_SUCCESS) {
+    throw BoutException("ARKodeReset failed in temporal filtering\n");
+  }
+
+  // For EMA: we keep averaging continuously (no reset).
+  // For SRA: enforce finite averaging windows of length tau_mean
+  // by restarting the averaging window when tau_mean_cur is equal to tau_mean
+  if (filtering_type == FilteringType::SRA && temp_filtering.window_full()) {
+    temp_filtering.restart_window(internal_time);
   }
 }
 
