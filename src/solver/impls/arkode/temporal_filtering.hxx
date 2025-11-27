@@ -42,8 +42,6 @@
 // SRA = Simple Running Average
 BOUT_ENUM_CLASS(FilteringType, None, EMA, SRA);
 
-#define compare_float(a, b) (std::fabs((a) - (b)) < 1.0e-14)
-
 class TemporalFiltering {
 public:
   TemporalFiltering() = default;
@@ -84,7 +82,7 @@ public:
     }
 
     // Not yet time to start averaging
-    if (!started && compare_float(time, mean_start_time)) {
+    if (!started && (time + 1.0e-14 < mean_start_time)) {
       return;
     }
 
@@ -98,7 +96,7 @@ public:
     }
 
     BoutReal dt = time - prev_time;
-    if (compare_float(dt, 1.0e-15)) {
+    if (dt <= 1.0e-14) {
       // just ignore if this ever happens
       return;
     }
