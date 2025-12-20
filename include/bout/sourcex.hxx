@@ -11,6 +11,8 @@
 const Field3D mask_x(const Field3D& f, bool BoutRealspace = true);
 const Field2D source_tanhx(const Field2D& f, BoutReal swidth, BoutReal slength);
 const Field2D source_expx2(const Field2D& f, BoutReal swidth, BoutReal slength);
+const Field2D sink_tanhx(const Field2D& f, BoutReal swidth,
+                         BoutReal slength, bool BoutRealspace = true);
 const Field3D sink_tanhx(const Field2D& f0, const Field3D& f, BoutReal swidth,
                          BoutReal slength, bool BoutRealspace = true);
 
