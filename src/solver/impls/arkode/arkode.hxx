@@ -160,6 +160,14 @@ private:
   BoutReal cfl_frac;
   /// Timestep adaptivity function
   AdapMethod adap_method;
+  /// Threshold for “multiple” successive error failures
+  int small_nef;
+  /// Maximum step size growth factor upon multiple successive failures
+  BoutReal etamxf;
+  /// Minimum value of step size growth factor upon a failure
+  BoutReal eta_min;
+  /// Maximum allowed growth factor in step size between consecutive steps
+  BoutReal mx_growth;
   /// Absolute tolerance
   BoutReal abstol;
   /// Relative tolerance
@@ -182,6 +190,8 @@ private:
   bool rightprec;
   /// Use user-supplied Jacobian function
   bool use_jacobian;
+  /// ARKodePrintAllStats: print all available integrator statistics at the end of the run
+  bool print_allstats;
   /// Temporal filtering of solution
   /// - Whether to use temporal filtering
   bool use_temporal_filtering{false};

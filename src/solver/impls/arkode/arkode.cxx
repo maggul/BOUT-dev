@@ -111,6 +111,18 @@ ArkodeSolver::ArkodeSolver(Options* opts)
               .doc("Set timestep adaptivity function: pid, pi, i, explicit_gustafsson,  "
                    "implicit_gustafsson, imex_gustafsson.")
               .withDefault(AdapMethod::PID)),
+      small_nef((*options)["small_nef"]
+              .doc("Threshold for “multiple” successive error failures")
+              .withDefault(2)),
+      etamxf((*options)["etamxf"]
+              .doc("Maximum step size growth factor upon multiple successive failures")
+              .withDefault(0.3)),
+      eta_min((*options)["eta_min"]
+              .doc("Minimum value of step size growth factor upon a failure")
+              .withDefault(0.1)),
+      mx_growth((*options)["mx_growth"]
+              .doc("Maximum allowed growth factor in step size between consecutive steps")
+              .withDefault(20.0)),
       abstol((*options)["atol"].doc("Absolute tolerance").withDefault(1.0e-12)),
       reltol((*options)["rtol"].doc("Relative tolerance").withDefault(1.0e-5)),
       use_vector_abstol((*options)["use_vector_abstol"]
@@ -140,6 +152,9 @@ ArkodeSolver::ArkodeSolver(Options* opts)
       use_jacobian((*options)["use_jacobian"]
                        .doc("Use user-supplied Jacobian function")
                        .withDefault(false)),
+      print_allstats((*options)["print_allstats"]
+                         .doc("Print all integrator stats at each evolve call")
+                         .withDefault(false)),
       use_temporal_filtering((*options)["use_temporal_filtering"]
                              .doc("Use temporal filtering of solution")
                              .withDefault(false)),
@@ -503,6 +518,31 @@ int ArkodeSolver::init() {
     temp_filtering.configure(filtering_type, tau_mean, mean_start_time);
   }
 
+  // Specifies the threshold for “multiple” successive error failures 
+  // before the etamxf parameter from ARKodeSetMaxEFailGrowth() is applied.
+  if (ARKodeSetSmallNumEFails(arkode_mem, small_nef) != ARK_SUCCESS) {
+    throw BoutException("ARKodeSetSmallNumEFails failed\n");
+  }
+
+  // Specifies the maximum step size growth factor upon multiple 
+  // successive accuracy-based error failures in the solver.
+  if (ARKodeSetMaxEFailGrowth(arkode_mem, etamxf) != ARK_SUCCESS) {
+    throw BoutException("ARKodeSetMaxEFailGrowth failed\n");
+  }
+
+  // Specifies the minimum allowed reduction factor in step size 
+  // between step attempts, resulting from a temporal error failure 
+  // in the integration process.
+  if (ARKodeSetMinReduction(arkode_mem, eta_min) != ARK_SUCCESS) {
+    throw BoutException("ARKodeSetMinReduction failed\n");
+  }
+
+  // Specifies the maximum allowed growth factor in step size 
+  // between consecutive steps in the integration process.
+   if (ARKodeSetMaxGrowth(arkode_mem, mx_growth) != ARK_SUCCESS) {
+     throw BoutException("ARKodeSetMaxGrowth failed\n");
+   }
+
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
   if (optimize) {
     output.write("\tUsing ARKode inbuilt optimization\n");
@@ -593,6 +633,7 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
   pre_ncalls = 0;
 
   int flag;
+  int mpi_rank;
   if (!monitor_timestep) {
     // Run in normal mode
     flag = ARKodeEvolve(arkode_mem, tout, uvec, &simtime, ARK_NORMAL);
@@ -619,6 +660,17 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
     // Get output at the desired time
     flag = ARKodeGetDky(arkode_mem, tout, 0, uvec);
     simtime = tout;
+  }
+
+  if (print_allstats) {
+    bout::globals::mpi->MPI_Comm_rank(BoutComm::get(), &mpi_rank);
+    if (mpi_rank == 0) {
+      flag = ARKodePrintAllStats(arkode_mem, stdout, SUN_OUTPUTFORMAT_TABLE);
+      if (flag != ARK_SUCCESS) {
+        output_error.write("ERROR ARKodePrintAllStats failed with the flag = {:d}\n", flag);
+            return -1.0;
+        }
+    }
   }
 
   // Copy variables
