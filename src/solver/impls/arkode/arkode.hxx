@@ -168,6 +168,8 @@ private:
   BoutReal eta_min;
   /// Maximum allowed growth factor in step size between consecutive steps
   BoutReal mx_growth;
+  /// Bias factor to slightly exaggerate the temporal error
+  BoutReal error_bias;
   /// Absolute tolerance
   BoutReal abstol;
   /// Relative tolerance
