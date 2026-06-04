@@ -123,6 +123,9 @@ ArkodeSolver::ArkodeSolver(Options* opts)
       mx_growth((*options)["mx_growth"]
               .doc("Maximum allowed growth factor in step size between consecutive steps")
               .withDefault(20.0)),
+      error_bias((*options)["error_bias"]
+              .doc("Bias factor to slightly exaggerate the temporal error")
+              .withDefault(1.0)),
       abstol((*options)["atol"].doc("Absolute tolerance").withDefault(1.0e-12)),
       reltol((*options)["rtol"].doc("Relative tolerance").withDefault(1.0e-5)),
       use_vector_abstol((*options)["use_vector_abstol"]
@@ -357,6 +360,11 @@ int ArkodeSolver::init() {
     throw BoutException("ARKStepSetAdaptivityMethod failed\n");
   }
 #endif
+
+  if (SUNAdaptController_SetErrorBias(controller, error_bias)
+      != ARK_SUCCESS) {
+    throw BoutException("SUNAdaptController_SetErrorBias failed\n");
+  }
 
   if (use_vector_abstol) {
     std::vector<BoutReal> f2dtols;
