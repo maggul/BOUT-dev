@@ -138,7 +138,7 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
       temp_filtering(),
       filtering_type((*options)["filtering_type"]
                      .doc("Type of temporal filtering to perform: None, EMA, SRA")
-                     .withDefault(FilteringType::None)),
+                     .withDefault(FilteringType::EMA)),
       tau_mean((*options)["tau_mean"]
                 .doc("Interval over which means are calculated")
                 .withDefault(10.0)),
@@ -528,6 +528,10 @@ int ArkodeMRISolver::init() {
 
   // Enable temporal filtering if requested
   if (use_temporal_filtering) {
+    if (filtering_type == FilteringType::None) {
+      filtering_type = FilteringType::EMA;
+      output.write("\tTemporal filtering type is None. Using EMA by default\n");
+    }
     output.write("\tUsing temporal filtering of solution\n");
     temp_filtering.reset_state();
     temp_filtering.initialize(uvec);
