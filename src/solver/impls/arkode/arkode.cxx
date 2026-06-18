@@ -49,7 +49,7 @@
 #include <arkode/arkode_arkstep.h>
 #include <arkode/arkode_bbdpre.h>
 #include <arkode/arkode_ls.h>
-#if SUNDIALS_CONTROLLER_SUPPORT
+#if ARKODE_CONTROLLER_SUPPORT
 #include <sunadaptcontroller/sunadaptcontroller_imexgus.h>
 #include <sunadaptcontroller/sunadaptcontroller_soderlind.h>
 #endif
@@ -329,6 +329,11 @@ int ArkodeSolver::init() {
   if (ARKodeSetAdaptivityAdjustment(arkode_mem, 0) != ARK_SUCCESS) {
     throw BoutException("ARKodeSetAdaptivityAdjustment failed\n");
   }
+
+  if (SUNAdaptController_SetErrorBias(controller, error_bias)
+      != ARK_SUCCESS) {
+    throw BoutException("SUNAdaptController_SetErrorBias failed\n");
+  }
 #else
   int adap_method_int;
   // Could cast to underlying integer, but this is more explicit
@@ -360,11 +365,6 @@ int ArkodeSolver::init() {
     throw BoutException("ARKStepSetAdaptivityMethod failed\n");
   }
 #endif
-
-  if (SUNAdaptController_SetErrorBias(controller, error_bias)
-      != ARK_SUCCESS) {
-    throw BoutException("SUNAdaptController_SetErrorBias failed\n");
-  }
 
   if (use_vector_abstol) {
     std::vector<BoutReal> f2dtols;
@@ -649,6 +649,11 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
   if (!monitor_timestep) {
     // Run in normal mode
     flag = ARKodeEvolve(arkode_mem, tout, uvec, &simtime, ARK_NORMAL);
+    if (flag != ARK_SUCCESS) {
+      output_error.write("ERROR ARKODE solve failed at t = {:e}, flag = {:d}\n",
+                         simtime, flag);
+      return -1.0;
+    }
     apply_temporal_filtering(simtime, uvec);
   } else {
     // Run in single step mode, to call timestep monitors
@@ -672,6 +677,11 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
     // Get output at the desired time
     flag = ARKodeGetDky(arkode_mem, tout, 0, uvec);
     simtime = tout;
+    if (flag != ARK_SUCCESS) {
+      output_error.write("ERROR ARKodeGetDky failed at t = {:e}, flag = {:d}\n",
+                         simtime, flag);
+      return -1.0;
+    }
   }
 
   if (print_allstats) {
@@ -690,11 +700,6 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
   // Call rhs function to get extra variables at this time
   run_rhs(simtime);
   // run_diffusive(simtime);
-  if (flag != ARK_SUCCESS) {
-    output_error.write("ERROR ARKODE solve failed at t = {:e}, flag = {:d}\n", simtime,
-                       flag);
-    return -1.0;
-  }
 
   return simtime;
 }
