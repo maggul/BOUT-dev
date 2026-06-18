@@ -139,6 +139,9 @@ CvodeSolver::CvodeSolver(Options* opts)
               .doc("Factor by which the Krylov linear solver’s convergence test constant "
                    "is reduced from the nonlinear solver test constant.")
               .withDefault(0.05)),
+      print_allstats((*options)["print_allstats"]
+                         .doc("Print all integrator stats at each evolve call")
+                         .withDefault(false)),
       use_temporal_filtering((*options)["use_temporal_filtering"]
                              .doc("Use temporal filtering of solution")
                              .withDefault(false)),
@@ -444,7 +447,9 @@ int CvodeSolver::init() {
 
 #if SUNDIALS_VERSION_MAJOR >= 6
   // Set the RHS function to be used in the nonlinear solver
-  CVodeSetNlsRhsFn(cvode_mem, cvode_nonlinear_rhs);
+  if (CVodeSetNlsRhsFn(cvode_mem, cvode_nonlinear_rhs) != CV_SUCCESS) {
+    throw BoutException("CVodeSetNlsRhsFn failed\n");
+  }
 #endif
 
   // Set internal tolerance factors
@@ -604,14 +609,23 @@ BoutReal CvodeSolver::run(BoutReal tout) {
   pre_ncalls = 0;
 
   int flag;
+  int mpi_rank;
   if (!monitor_timestep) {
     // Run in normal mode
     flag = CVode(cvode_mem, tout, uvec, &simtime, CV_NORMAL);
+    if (flag < 0) {
+      throw BoutException("ERROR CVODE solve failed at t = {:e}, flag = {:d}\n", simtime,
+                          flag);
+    }
     apply_temporal_filtering(simtime, uvec);
   } else {
     // Run in single step mode, to call timestep monitors
     BoutReal internal_time;
-    CVodeGetCurrentTime(cvode_mem, &internal_time);
+    flag = CVodeGetCurrentTime(cvode_mem, &internal_time);
+    if (flag != CV_SUCCESS) {
+      throw BoutException("ERROR CVodeGetCurrentTime failed with flag = {:d}\n", flag);
+    }
+
     while (internal_time < tout) {
       // Run another step
       BoutReal last_time = internal_time;
@@ -628,7 +642,21 @@ BoutReal CvodeSolver::run(BoutReal tout) {
     }
     // Get output at the desired time
     flag = CVodeGetDky(cvode_mem, tout, 0, uvec);
+    if (flag != CV_SUCCESS) {
+      throw BoutException("ERROR CVodeGetDky failed at t = {:e}, flag = {:d}\n", tout,
+                          flag);
+    }
     simtime = tout;
+  }
+
+  if (print_allstats) {
+    bout::globals::mpi->MPI_Comm_rank(BoutComm::get(), &mpi_rank);
+    if (mpi_rank == 0) {
+      flag = CVodePrintAllStats(cvode_mem, stdout, SUN_OUTPUTFORMAT_TABLE);
+      if (flag != CV_SUCCESS) {
+        throw BoutException("ERROR CVodePrintAllStats failed with flag = {:d}\n", flag);
+        }
+    }
   }
 
   // Copy variables
@@ -636,11 +664,6 @@ BoutReal CvodeSolver::run(BoutReal tout) {
 
   // Call rhs function to get extra variables at this time
   run_rhs(simtime);
-
-  if (flag < 0) {
-    throw BoutException("ERROR CVODE solve failed at t = {:e}, flag = {:d}\n", simtime,
-                        flag);
-  }
 
   return simtime;
 }

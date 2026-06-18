@@ -125,6 +125,8 @@ private:
   bool use_jacobian;
   BoutReal cvode_nonlinear_convergence_coef;
   BoutReal cvode_linear_convergence_coef;
+  /// CVodePrintAllStats: print all available integrator statistics at the end of the run
+  bool print_allstats;
   /// Temporal filtering of solution
   /// - Whether to use temporal filtering
   bool use_temporal_filtering{false};
