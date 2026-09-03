@@ -1,5 +1,5 @@
 /**************************************************************************
- * Copyright 2010 - 2025 BOUT++ contributors
+ * Copyright 2010 - 2026 BOUT++ contributors
  *
  * Contact: Ben Dudson, dudson2@llnl.gov
  *
@@ -24,23 +24,41 @@
 
 #include "bout/array.hxx"
 #include "bout/assert.hxx"
+#include "bout/bout_types.hxx"
 #include "bout/boutcomm.hxx"
 #include "bout/boutexception.hxx"
+#include "bout/field2d.hxx"
+#include "bout/field3d.hxx"
 #include "bout/field_factory.hxx"
+#include "bout/globals.hxx"
 #include "bout/initialprofiles.hxx"
 #include "bout/interpolation.hxx"
+#include "bout/monitor.hxx"
 #include "bout/msg_stack.hxx"
+#include "bout/options.hxx"
 #include "bout/output.hxx"
 #include "bout/region.hxx"
 #include "bout/solver.hxx"
+#include "bout/sys/gettext.hxx"
 #include "bout/sys/timer.hxx"
 #include "bout/sys/uuid.h"
+#include "bout/unused.hxx"
+#include "bout/utils.hxx"
+#include "bout/vector2d.hxx"
+#include "bout/vector3d.hxx"
+
+#include <fmt/format.h>
 
 #include <cmath>
-#include <cstring>
 #include <ctime>
+#include <fstream>
+#include <iterator>
+#include <memory>
 #include <numeric>
 #include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 // Implementations:
 #include "impls/adams_bashforth/adams_bashforth.hxx"
@@ -65,6 +83,44 @@
 int* Solver::pargc = nullptr;
 char*** Solver::pargv = nullptr;
 
+namespace {
+std::string jsonEscape(const std::string& input) {
+  std::string escaped;
+  escaped.reserve(input.size());
+
+  for (const char ch : input) {
+    switch (ch) {
+    case '\\':
+      escaped += "\\\\";
+      break;
+    case '"':
+      escaped += "\\\"";
+      break;
+    case '\b':
+      escaped += "\\b";
+      break;
+    case '\f':
+      escaped += "\\f";
+      break;
+    case '\n':
+      escaped += "\\n";
+      break;
+    case '\r':
+      escaped += "\\r";
+      break;
+    case '\t':
+      escaped += "\\t";
+      break;
+    default:
+      escaped += ch;
+      break;
+    }
+  }
+
+  return escaped;
+}
+} // namespace
+
 /**************************************************************************
  * Constructor
  **************************************************************************/
@@ -80,6 +136,18 @@ Solver::Solver(Options* opts)
                                   "timestep, to make it easier to concatenate output "
                                   "data sets in time")
                              .withDefault(false)),
+      save_jacobian_index_base(
+          (*options)["save_jacobian_index_base"]
+              .doc("Write jacobian_index_base so saved PETSc Jacobians can be mapped "
+                   "back to variables and cell indices in post-processing")
+              .withDefault(false)),
+      jacobian_export_prefix((*options)["jacobian_export_prefix"]
+                                 .doc("Prefix for saved Jacobian matrix files")
+                                 .withDefault("jacobian")),
+      jacobian_export_format(
+          (*options)["jacobian_export_format"]
+              .doc("PETSc MatView format for saved Jacobians: binary or ascii")
+              .withDefault(bout::PetscMatrixExportFormat::binary)),
       is_nonsplit_model_diffusive(
           (*options)["is_nonsplit_model_diffusive"]
               .doc("If not a split operator, treat RHS as diffusive?")
@@ -508,11 +576,11 @@ int Solver::solve(int nout, BoutReal timestep) {
   finaliseMonitorPeriods(nout, timestep);
 
   output_progress.write(
-      _("Solver running for {:d} outputs with output timestep of {:e}\n"), nout,
+      _f("Solver running for {:d} outputs with output timestep of {:e}\n"), nout,
       timestep);
   if (default_monitor_period > 1) {
     output_progress.write(
-        _("Solver running for {:d} outputs with monitor timestep of {:e}\n"),
+        _f("Solver running for {:d} outputs with monitor timestep of {:e}\n"),
         nout / default_monitor_period, timestep * default_monitor_period);
   }
 
@@ -538,7 +606,7 @@ int Solver::solve(int nout, BoutReal timestep) {
   }
 
   time_t start_time = time(nullptr);
-  output_progress.write(_("\nRun started at  : {:s}\n"), toString(start_time));
+  output_progress.write(_f("\nRun started at  : {:s}\n"), toString(start_time));
 
   Timer timer("run"); // Start timer
 
@@ -584,7 +652,7 @@ int Solver::solve(int nout, BoutReal timestep) {
     status = run();
 
     time_t end_time = time(nullptr);
-    output_progress.write(_("\nRun finished at  : {:s}\n"), toString(end_time));
+    output_progress.write(_f("\nRun finished at  : {:s}\n"), toString(end_time));
     output_progress.write(_("Run time : "));
 
     int dt = end_time - start_time;
@@ -637,7 +705,7 @@ std::string Solver::createRunID() const {
 }
 
 std::string Solver::getRunID() const {
-  AUTO_TRACE();
+
   if (run_id == default_run_id) {
     throw BoutException("run_id not set!");
   }
@@ -645,7 +713,7 @@ std::string Solver::getRunID() const {
 }
 
 std::string Solver::getRunRestartFrom() const {
-  AUTO_TRACE();
+
   // Check against run_id, because this might not be a restarted run
   if (run_id == default_run_id) {
     throw BoutException("run_restart_from not set!");
@@ -665,9 +733,6 @@ void Solver::writeToModelOutputFile(const Options& options) {
  **************************************************************************/
 
 int Solver::init() {
-
-  TRACE("Solver::init()");
-
   if (initialised) {
     throw BoutException(_("ERROR: Solver is already initialised\n"));
   }
@@ -693,6 +758,14 @@ void Solver::outputVars(Options& output_options, bool save_repeat) {
            "'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz' means the run is not a restart, "
            "or the previous run did not have a run_id.")
       .assignRepeat(run_restart_from, "t", save_repeat and save_repeat_run_id, "Solver");
+
+  if (initialised and save_jacobian_index_base) {
+    // The Jacobian index base offsets are not time-dependent
+    // Only need to calculate once, but can only be calculated
+    // once the solver has been initialised. This outputVars
+    // is called once at the start before Solver is initialised.
+    output_options["jacobian_index_base"].force(jacobianIndexBase(), "Solver");
+  }
 
   // Add 2D and 3D evolving fields to output file
   for (const auto& f : f2d) {
@@ -731,7 +804,7 @@ void Solver::outputVars(Options& output_options, bool save_repeat) {
 
 void Solver::readEvolvingVariablesFromOptions(Options& options) {
   run_id = options["run_id"].withDefault(default_run_id);
-  simtime = options["tt"].as<BoutReal>();
+  simtime = options["tt"].withDefault<BoutReal>(0.0);
   iteration = options["hist_hi"].withDefault<int>(0);
   iteration_offset = iteration;
 
@@ -770,7 +843,7 @@ BoutReal Solver::adjustMonitorPeriods(Monitor* new_monitor) {
   }
 
   if (!isMultiple(internal_timestep, new_monitor->timestep)) {
-    throw BoutException(_("Couldn't add Monitor: {:g} is not a multiple of {:g}!"),
+    throw BoutException(_f("Couldn't add Monitor: {:g} is not a multiple of {:g}!"),
                         internal_timestep, new_monitor->timestep);
   }
 
@@ -786,8 +859,8 @@ BoutReal Solver::adjustMonitorPeriods(Monitor* new_monitor) {
 
   if (initialised) {
     throw BoutException(
-        _("Solver::addMonitor: Cannot reduce timestep (from {:g} to {:g}) "
-          "after init is called!"),
+        _f("Solver::addMonitor: Cannot reduce timestep (from {:g} to {:g}) "
+           "after init is called!"),
         internal_timestep, new_monitor->timestep);
   }
 
@@ -887,7 +960,7 @@ int Solver::call_monitors(BoutReal simtime, int iter, int NOUT) {
             monitor.monitor->call(this, simtime, iter / monitor.monitor->period,
                                   NOUT / monitor.monitor->period);
         if (ret != 0) {
-          throw BoutException(_("Monitor signalled to quit (return code {})"), ret);
+          throw BoutException(_f("Monitor signalled to quit (return code {})"), ret);
         }
         // Write the monitor's diagnostics to the main output file
         Options monitor_dump;
@@ -909,7 +982,7 @@ int Solver::call_monitors(BoutReal simtime, int iter, int NOUT) {
     for (const auto& monitor : monitors) {
       monitor.monitor->cleanup();
     }
-    output_error.write(_("Monitor signalled to quit (exception {})\n"), e.what());
+    output_error.write(_f("Monitor signalled to quit (exception {})\n"), e.what());
     throw;
   }
 
@@ -1042,179 +1115,6 @@ std::unique_ptr<Solver> Solver::create(const SolverType& type, Options* opts) {
   return SolverFactory::getInstance().create(type, opts);
 }
 
-/**************************************************************************
- * Looping over variables
- *
- * NOTE: This part is very inefficient, and should be replaced ASAP
- * Is the interleaving of variables needed or helpful to the solver?
- **************************************************************************/
-
-/// Perform an operation at a given Ind2D (jx,jy) location, moving data between BOUT++ and CVODE
-void Solver::loop_vars_op(Ind2D i2d, BoutReal* udata, int& p, SOLVER_VAR_OP op,
-                          bool bndry) {
-  // Use global mesh: FIX THIS!
-  Mesh* mesh = bout::globals::mesh;
-
-  int nz = mesh->LocalNz;
-
-  switch (op) {
-  case SOLVER_VAR_OP::LOAD_VARS: {
-    /// Load variables from IDA into BOUT++
-
-    // Loop over 2D variables
-    for (const auto& f : f2d) {
-      if (bndry && !f.evolve_bndry) {
-        continue;
-      }
-      (*f.var)[i2d] = udata[p];
-      p++;
-    }
-
-    for (int jz = 0; jz < nz; jz++) {
-
-      // Loop over 3D variables
-      for (const auto& f : f3d) {
-        if (bndry && !f.evolve_bndry) {
-          continue;
-        }
-        (*f.var)[f.var->getMesh()->ind2Dto3D(i2d, jz)] = udata[p];
-        p++;
-      }
-    }
-    break;
-  }
-  case SOLVER_VAR_OP::LOAD_DERIVS: {
-    /// Load derivatives from IDA into BOUT++
-    /// Used for preconditioner
-
-    // Loop over 2D variables
-    for (const auto& f : f2d) {
-      if (bndry && !f.evolve_bndry) {
-        continue;
-      }
-      (*f.F_var)[i2d] = udata[p];
-      p++;
-    }
-
-    for (int jz = 0; jz < nz; jz++) {
-
-      // Loop over 3D variables
-      for (const auto& f : f3d) {
-        if (bndry && !f.evolve_bndry) {
-          continue;
-        }
-        (*f.F_var)[f.F_var->getMesh()->ind2Dto3D(i2d, jz)] = udata[p];
-        p++;
-      }
-    }
-
-    break;
-  }
-  case SOLVER_VAR_OP::SET_ID: {
-    /// Set the type of equation (Differential or Algebraic)
-
-    // Loop over 2D variables
-    for (const auto& f : f2d) {
-      if (bndry && !f.evolve_bndry) {
-        continue;
-      }
-      if (f.constraint) {
-        udata[p] = 0;
-      } else {
-        udata[p] = 1;
-      }
-      p++;
-    }
-
-    for (int jz = 0; jz < nz; jz++) {
-
-      // Loop over 3D variables
-      for (const auto& f : f3d) {
-        if (bndry && !f.evolve_bndry) {
-          continue;
-        }
-        if (f.constraint) {
-          udata[p] = 0;
-        } else {
-          udata[p] = 1;
-        }
-        p++;
-      }
-    }
-
-    break;
-  }
-  case SOLVER_VAR_OP::SAVE_VARS: {
-    /// Save variables from BOUT++ into IDA (only used at start of simulation)
-
-    // Loop over 2D variables
-    for (const auto& f : f2d) {
-      if (bndry && !f.evolve_bndry) {
-        continue;
-      }
-      udata[p] = (*f.var)[i2d];
-      p++;
-    }
-
-    for (int jz = 0; jz < nz; jz++) {
-
-      // Loop over 3D variables
-      for (const auto& f : f3d) {
-        if (bndry && !f.evolve_bndry) {
-          continue;
-        }
-        udata[p] = (*f.var)[f.var->getMesh()->ind2Dto3D(i2d, jz)];
-        p++;
-      }
-    }
-    break;
-  }
-    /// Save time-derivatives from BOUT++ into CVODE (returning RHS result)
-  case SOLVER_VAR_OP::SAVE_DERIVS: {
-
-    // Loop over 2D variables
-    for (const auto& f : f2d) {
-      if (bndry && !f.evolve_bndry) {
-        continue;
-      }
-      udata[p] = (*f.F_var)[i2d];
-      p++;
-    }
-
-    for (int jz = 0; jz < nz; jz++) {
-
-      // Loop over 3D variables
-      for (const auto& f : f3d) {
-        if (bndry && !f.evolve_bndry) {
-          continue;
-        }
-        udata[p] = (*f.F_var)[f.F_var->getMesh()->ind2Dto3D(i2d, jz)];
-        p++;
-      }
-    }
-    break;
-  }
-  }
-}
-
-/// Loop over variables and domain. Used for all data operations for consistency
-void Solver::loop_vars(BoutReal* udata, SOLVER_VAR_OP op) {
-  // Use global mesh: FIX THIS!
-  Mesh* mesh = bout::globals::mesh;
-
-  int p = 0; // Counter for location in udata array
-
-  // All boundaries
-  for (const auto& i2d : mesh->getRegion2D("RGN_BNDRY")) {
-    loop_vars_op(i2d, udata, p, op, true);
-  }
-
-  // Bulk of points
-  for (const auto& i2d : mesh->getRegion2D("RGN_NOBNDRY")) {
-    loop_vars_op(i2d, udata, p, op, false);
-  }
-}
-
 void Solver::load_vars(BoutReal* udata) {
   // Make sure data is allocated
   for (const auto& f : f2d) {
@@ -1225,7 +1125,8 @@ void Solver::load_vars(BoutReal* udata) {
     f.var->setLocation(f.location);
   }
 
-  loop_vars(udata, SOLVER_VAR_OP::LOAD_VARS);
+  loop_vars(VarRange<FieldCategories::VARS, Field2D>(f2d),
+            VarRange<FieldCategories::VARS, Field3D>(f3d), udata, SOLVER_VAR_OP::LOAD);
 
   // Mark each vector as either co- or contra-variant
 
@@ -1247,7 +1148,8 @@ void Solver::load_derivs(BoutReal* udata) {
     f.F_var->setLocation(f.location);
   }
 
-  loop_vars(udata, SOLVER_VAR_OP::LOAD_DERIVS);
+  loop_vars(VarRange<FieldCategories::DERIVS, Field2D>(f2d),
+            VarRange<FieldCategories::DERIVS, Field3D>(f3d), udata, SOLVER_VAR_OP::LOAD);
 
   // Mark each vector as either co- or contra-variant
 
@@ -1263,13 +1165,13 @@ void Solver::load_derivs(BoutReal* udata) {
 void Solver::save_vars(BoutReal* udata) {
   for (const auto& f : f2d) {
     if (!f.var->isAllocated()) {
-      throw BoutException(_("Variable '{:s}' not initialised"), f.name);
+      throw BoutException(_f("Variable '{:s}' not initialised"), f.name);
     }
   }
 
   for (const auto& f : f3d) {
     if (!f.var->isAllocated()) {
-      throw BoutException(_("Variable '{:s}' not initialised"), f.name);
+      throw BoutException(_f("Variable '{:s}' not initialised"), f.name);
     }
   }
 
@@ -1289,7 +1191,8 @@ void Solver::save_vars(BoutReal* udata) {
     }
   }
 
-  loop_vars(udata, SOLVER_VAR_OP::SAVE_VARS);
+  loop_vars(VarRange<FieldCategories::VARS, Field2D>(f2d),
+            VarRange<FieldCategories::VARS, Field3D>(f3d), udata, SOLVER_VAR_OP::SAVE);
 }
 
 void Solver::save_derivs(BoutReal* dudata) {
@@ -1312,17 +1215,21 @@ void Solver::save_derivs(BoutReal* dudata) {
   // Make sure 3D fields are at the correct cell location
   for (const auto& f : f3d) {
     if (f.var->getLocation() != (f.F_var)->getLocation()) {
-      throw BoutException(_("Time derivative at wrong location - Field is at {:s}, "
-                            "derivative is at {:s} for field '{:s}'\n"),
+      throw BoutException(_f("Time derivative at wrong location - Field is at {:s}, "
+                             "derivative is at {:s} for field '{:s}'\n"),
                           toString(f.var->getLocation()),
                           toString(f.F_var->getLocation()), f.name);
     }
   }
 
-  loop_vars(dudata, SOLVER_VAR_OP::SAVE_DERIVS);
+  loop_vars(VarRange<FieldCategories::DERIVS, Field2D>(f2d),
+            VarRange<FieldCategories::DERIVS, Field3D>(f3d), dudata, SOLVER_VAR_OP::SAVE);
 }
 
-void Solver::set_id(BoutReal* udata) { loop_vars(udata, SOLVER_VAR_OP::SET_ID); }
+void Solver::set_id(BoutReal* udata) {
+  loop_vars(VarRange<FieldCategories::VARS, Field2D>(f2d),
+            VarRange<FieldCategories::VARS, Field3D>(f3d), udata, SOLVER_VAR_OP::SET_ID);
+}
 
 Field3D Solver::globalIndex(int localStart) {
   // Use global mesh: FIX THIS!
@@ -1385,6 +1292,133 @@ Field3D Solver::globalIndex(int localStart) {
   mesh->communicate(index);
 
   return index;
+}
+
+Field3D Solver::jacobianIndexBase(int localStart) { return globalIndex(localStart); }
+
+std::vector<Solver::JacobianVariableMetadata> Solver::getJacobianMetadata2D() const {
+  std::vector<JacobianVariableMetadata> metadata;
+  metadata.reserve(f2d.size());
+
+  for (int i = 0; i < static_cast<int>(f2d.size()); ++i) {
+    metadata.push_back(JacobianVariableMetadata{i, f2d[i].name, toString(f2d[i].location),
+                                                f2d[i].evolve_bndry, f2d[i].constraint,
+                                                f2d[i].description});
+  }
+
+  return metadata;
+}
+
+std::vector<Solver::JacobianVariableMetadata> Solver::getJacobianMetadata3D() const {
+  std::vector<JacobianVariableMetadata> metadata;
+  metadata.reserve(f3d.size());
+
+  for (int i = 0; i < static_cast<int>(f3d.size()); ++i) {
+    metadata.push_back(JacobianVariableMetadata{i, f3d[i].name, toString(f3d[i].location),
+                                                f3d[i].evolve_bndry, f3d[i].constraint,
+                                                f3d[i].description});
+  }
+
+  return metadata;
+}
+
+Solver::JacobianMetadata
+Solver::getJacobianMetadata(const std::string& solver_name) const {
+  return JacobianMetadata{1,
+                          solver_name,
+                          n2Dvars(),
+                          n3Dvars(),
+                          getJacobianMetadata2D(),
+                          getJacobianMetadata3D(),
+                          "For each (x,y): 2D variables at z=0, then 3D variables for "
+                          "z=0..Nz-1; evolved boundary points precede RGN_NOBNDRY"};
+}
+
+void Solver::writeJacobianMetadataJson(const std::string& filename,
+                                       const std::string& solver_name) const {
+  if (MYPE != 0) {
+    return;
+  }
+
+  const auto metadata = getJacobianMetadata(solver_name);
+  std::ofstream output_file(filename);
+  if (!output_file.is_open()) {
+    throw BoutException("Failed to open Jacobian metadata file '{}'", filename);
+  }
+
+  std::string json_file;
+  json_file.reserve(512);
+
+  auto write_variables = [&](const std::vector<JacobianVariableMetadata>& variables,
+                             const char* name) {
+    fmt::format_to(std::back_inserter(json_file), "  \"{}\": [\n", name);
+    for (std::size_t i = 0; i < variables.size(); ++i) {
+      const auto& variable = variables[i];
+      fmt::format_to(
+          std::back_inserter(json_file),
+          "    {{\"offset\": {}, \"name\": \"{}\", \"location\": \"{}\", "
+          "\"evolve_bndry\": {}, \"constraint\": {}, \"description\": \"{}\"}}",
+          variable.offset, jsonEscape(variable.name), jsonEscape(variable.location),
+          variable.evolve_bndry ? "true" : "false",
+          variable.constraint ? "true" : "false", jsonEscape(variable.description));
+      if (i + 1 != variables.size()) {
+        fmt::format_to(std::back_inserter(json_file), ",");
+      }
+      fmt::format_to(std::back_inserter(json_file), "\n");
+    }
+    fmt::format_to(std::back_inserter(json_file), "  ]");
+  };
+
+  fmt::format_to(std::back_inserter(json_file),
+                 "{{\n"
+                 "  \"format_version\": {},\n"
+                 "  \"solver\": \"{}\",\n"
+                 "  \"n2d\": {},\n"
+                 "  \"n3d\": {},\n",
+                 metadata.format_version, jsonEscape(metadata.solver_name), metadata.n2d,
+                 metadata.n3d);
+  write_variables(metadata.variables_2d, "variables_2d");
+  fmt::format_to(std::back_inserter(json_file), ",\n");
+  write_variables(metadata.variables_3d, "variables_3d");
+  fmt::format_to(std::back_inserter(json_file),
+                 ",\n"
+                 "  \"ordering\": \"{}\"\n"
+                 "}}\n",
+                 jsonEscape(metadata.ordering));
+
+  output_file << json_file;
+}
+
+void Solver::writeOnceJacobianMetadata(const std::string& solver_name) {
+  if (jacobian_metadata_written) {
+    return;
+  }
+
+  const std::string datadir = Options::root()["datadir"];
+  const std::string metadata_filename = datadir + "/jacobian_metadata.json";
+  output.write("Jacobian metadata written to {}\n", metadata_filename);
+  writeJacobianMetadataJson(metadata_filename, solver_name);
+  jacobian_metadata_written = true;
+}
+
+#if BOUT_HAS_PETSC
+void Solver::writeJacobianMatrix(bout::JacobianExportKind kind, Mat jacobian) {
+  BOUT_DO_PETSC(PetscPreconditioner::saveMatrix(
+      jacobian,
+      getJacobianMatrixFilename(this->jacobian_export_prefix, kind,
+                                this->jacobian_export_format),
+      this->jacobian_export_format));
+}
+#endif
+
+std::string Solver::getJacobianMatrixFilename(const std::string& jacobian_export_prefix,
+                                              bout::JacobianExportKind kind,
+                                              bout::PetscMatrixExportFormat format) {
+  // The directory the output data is stored in
+  const std::string datadir = Options::root()["datadir"];
+  const std::string stem = fmt::format("{}/{}_{}_{:06d}", datadir, jacobian_export_prefix,
+                                       toString(kind), this->jacobian_export_counter++);
+  return stem + (format == bout::PetscMatrixExportFormat::binary ? ".dat" : ".txt");
 }
 
 /**************************************************************************
@@ -1732,7 +1766,7 @@ void Solver::post_rhs(BoutReal UNUSED(t)) {
 #if CHECK > 0
   for (const auto& f : f3d) {
     if (!f.F_var->isAllocated()) {
-      throw BoutException(_("Time derivative for variable '{:s}' not set"), f.name);
+      throw BoutException(_f("Time derivative for variable '{:s}' not set"), f.name);
     }
   }
 #endif

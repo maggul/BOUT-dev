@@ -5,6 +5,7 @@
 
 #if BOUT_HAS_HYPRE
 
+#include "bout/assert.hxx"
 #include "bout/bout_enum_class.hxx"
 #include "bout/boutcomm.hxx"
 #include "bout/caliper_wrapper.hxx"
@@ -20,6 +21,7 @@
 #include "HYPRE_utilities.h"
 #include "_hypre_utilities.h"
 
+#include <cmath>
 #include <memory>
 
 // BOUT_ENUM_CLASS does not work inside namespaces
@@ -159,7 +161,7 @@ public:
   explicit HypreVector(IndexerPtr<T> indConverter) : indexConverter(indConverter) {
     Mesh& mesh = *indConverter->getMesh();
     const MPI_Comm comm =
-        std::is_same_v<T, FieldPerp> ? mesh.getXcomm() : BoutComm::get();
+        std::is_same_v<T, FieldPerp> ? mesh.getXZcomm() : BoutComm::get();
 
     HYPRE_BigInt jlower = indConverter->getGlobalStart();
     HYPRE_BigInt jupper = jlower + indConverter->size() - 1; // inclusive end
@@ -265,19 +267,19 @@ public:
     }
 
     Element& operator=(const Element& other) {
-      ASSERT3(finite(static_cast<BoutReal>(other)));
+      ASSERT3(std::isfinite(static_cast<BoutReal>(other)));
       return *this = static_cast<BoutReal>(other);
     }
     Element& operator=(BoutReal value_) {
-      ASSERT3(finite(value_));
+      ASSERT3(std::isfinite(value_));
       value = value_;
       vector->V[vec_i] = value_;
       return *this;
     }
     Element& operator+=(BoutReal value_) {
-      ASSERT3(finite(value_));
+      ASSERT3(std::isfinite(value_));
       value += value_;
-      ASSERT3(finite(value));
+      ASSERT3(std::isfinite(value));
       vector->V[vec_i] += value_;
       return *this;
     }
@@ -380,7 +382,7 @@ public:
       : hypre_matrix(new HYPRE_IJMatrix, MatrixDeleter{}), index_converter(indConverter) {
     Mesh* mesh = indConverter->getMesh();
     const MPI_Comm comm =
-        std::is_same_v<T, FieldPerp> ? mesh->getXcomm() : BoutComm::get();
+        std::is_same_v<T, FieldPerp> ? mesh->getXZcomm() : BoutComm::get();
     parallel_transform = &mesh->getCoordinates()->getParallelTransform();
 
     ilower = indConverter->getGlobalStart();
@@ -432,7 +434,7 @@ public:
           weights(weights_) {
 #if CHECK > 2
       for (const auto val : weights) {
-        ASSERT3(finite(val));
+        ASSERT3(std::isfinite(val));
       }
 #endif
       ASSERT2(positions.size() == weights.size());
@@ -444,23 +446,23 @@ public:
       value = matrix->getVal(row, column);
     }
     Element& operator=(const Element& other) {
-      AUTO_TRACE();
-      ASSERT3(finite(static_cast<BoutReal>(other)));
+
+      ASSERT3(std::isfinite(static_cast<BoutReal>(other)));
       return *this = static_cast<BoutReal>(other);
     }
     Element& operator=(BoutReal value_) {
-      AUTO_TRACE();
-      ASSERT3(finite(value_));
+
+      ASSERT3(std::isfinite(value_));
       value = value_;
       setValues(value);
       return *this;
     }
     Element& operator+=(BoutReal value_) {
-      AUTO_TRACE();
-      ASSERT3(finite(value_));
-      auto column_position = std::find(cbegin(positions), cend(positions), column);
+
+      ASSERT3(std::isfinite(value_));
+      auto column_position = std::ranges::find(positions, column);
       if (column_position != cend(positions)) {
-        const auto i = std::distance(cbegin(positions), column_position);
+        const auto i = std::distance(begin(positions), column_position);
         value += weights[i] * value_;
       }
       addValues(value_);
@@ -812,7 +814,7 @@ public:
                            "values are: gmres, bicgstab, pcg")
                       .withDefault(HYPRE_SOLVER_TYPE::bicgstab);
 
-    comm = std::is_same_v<T, FieldPerp> ? mesh.getXcomm() : BoutComm::get();
+    comm = std::is_same_v<T, FieldPerp> ? mesh.getXZcomm() : BoutComm::get();
 
     auto print_level =
         options["hypre_print_level"]

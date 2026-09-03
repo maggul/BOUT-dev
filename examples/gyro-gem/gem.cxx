@@ -4,17 +4,17 @@
  * 6 moments for each species
  *
  * "GEM - An Energy Conserving Electromagnetic Gyrofluid Model"
- *  by Bruce D Scott. arXiv:physics/0501124v1 23 Jan 2005 
+ *  by Bruce D Scott. arXiv:physics/0501124v1 23 Jan 2005
  *
  * This version uses global parameters for collisionality etc.
  ****************************************************************/
 
+#include "bout/tokamak_coordinates.hxx"
 #include <bout/constants.hxx>
-#include <bout/physicsmodel.hxx>
-
 #include <bout/gyro_average.hxx>
 #include <bout/interpolation.hxx>
 #include <bout/invert_laplace.hxx>
+#include <bout/physicsmodel.hxx>
 
 /// Fundamental constants
 
@@ -185,14 +185,6 @@ class GEM : public PhysicsModel {
     //////////////////////////////////
     // Read profiles
 
-    // Mesh
-    Field2D Rxy, Bpxy, Btxy, Bxy, hthe;
-    GRID_LOAD(Rxy);  // Major radius [m]
-    GRID_LOAD(Bpxy); // Poloidal B field [T]
-    GRID_LOAD(Btxy); // Toroidal B field [T]
-    GRID_LOAD(Bxy);  // Total B field [T]
-    GRID_LOAD(hthe); // Poloidal arc length [m / radian]
-
     GRID_LOAD(Te0); // Electron temperature in eV
     GRID_LOAD(Ni0); // Ion number density in 10^20 m^-3
 
@@ -255,6 +247,8 @@ class GEM : public PhysicsModel {
 
     if (mesh->get(Bbar, "Bbar")) {
       if (mesh->get(Bbar, "bmag")) {
+        Field3D Bxy;
+        mesh->get(Bxy, "Bxy");
         Bbar = max(Bxy, true);
       }
     }
@@ -355,44 +349,13 @@ class GEM : public PhysicsModel {
     //////////////////////////////////
     // Metric tensor components
 
-    coord = mesh->getCoordinates();
-
-    // Normalise
-    hthe /= Lbar; // parallel derivatives normalised to Lperp
-
-    Bpxy /= Bbar;
-    Btxy /= Bbar;
-    Bxy /= Bbar;
-
-    Rxy /= rho_s; // Perpendicular derivatives normalised to rho_s
-    coord->dx /= rho_s * rho_s * Bbar;
-
-    // Metric components
-
-    coord->g11 = SQ(Rxy * Bpxy);
-    coord->g22 = 1.0 / SQ(hthe);
-    coord->g33 = SQ(Bxy) / coord->g11;
-    coord->g12 = 0.0;
-    coord->g13 = 0.;
-    coord->g23 = -Btxy / (hthe * Bpxy * Rxy);
-
-    coord->J = hthe / Bpxy;
-    coord->Bxy = Bxy;
-
-    coord->g_11 = 1.0 / coord->g11;
-    coord->g_22 = SQ(Bxy * hthe / Bpxy);
-    coord->g_33 = Rxy * Rxy;
-    coord->g_12 = 0.;
-    coord->g_13 = 0.;
-    coord->g_23 = Btxy * hthe * Rxy / Bpxy;
-
-    coord->geometry();
+    const auto tokamak_coords = bout::set_tokamak_coordinates(*mesh, rho_s, Bbar);
 
     // Set B field vector
 
     B0vec.covariant = false;
     B0vec.x = 0.;
-    B0vec.y = Bpxy / hthe;
+    B0vec.y = tokamak_coords.Bpxy / tokamak_coords.hthe;
     B0vec.z = 0.;
 
     // Precompute this for use in RHS
@@ -400,7 +363,7 @@ class GEM : public PhysicsModel {
       if (curv_logB) {
         Grad_par_logB = Grad_par(logB);
       } else {
-        Grad_par_logB = Grad_par(log(coord->Bxy));
+        Grad_par_logB = Grad_par(log(coord->Bxy()));
       }
     } else {
       Grad_par_logB = 0.;
@@ -1153,7 +1116,7 @@ class GEM : public PhysicsModel {
     if (curv_logB) {
       return -bracket(2. * logB, f, BRACKET_ARAKAWA);
     }
-    return -bracket(2. * log(coord->Bxy), f, BRACKET_ARAKAWA);
+    return -bracket(2. * log(coord->Bxy()), f, BRACKET_ARAKAWA);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -1168,7 +1131,7 @@ class GEM : public PhysicsModel {
     delp2.applyBoundary("neumann");
     mesh->communicate(delp2);
 
-    return nu_perp * Delp2(delp2 * SQ(SQ(1. / coord->Bxy)))
+    return nu_perp * Delp2(delp2 * SQ(SQ(1. / coord->Bxy())))
            - nu_par * Grad2_par2(f) // NB: This should be changed for variable B
         ;
   }
@@ -1184,8 +1147,8 @@ class GEM : public PhysicsModel {
   }
 
   const Field3D Div_parP(const Field3D& f, CELL_LOC loc = CELL_DEFAULT) {
-    return interp_to(coord->Bxy, loc)
-           * Grad_parP(f / interp_to(coord->Bxy, f.getLocation()), loc);
+    return interp_to(coord->Bxy(), loc)
+           * Grad_parP(f / interp_to(coord->Bxy(), f.getLocation()), loc);
   }
 };
 

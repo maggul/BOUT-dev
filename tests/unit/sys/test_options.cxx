@@ -660,6 +660,19 @@ TEST_F(OptionsTest, AssignOption) {
   EXPECT_EQ(option2.as<int>(), 42);
 }
 
+TEST_F(OptionsTest, AssignOptionName) {
+  Options option1, option2, option3;
+
+  option1 = 42;
+
+  option2 = option1.copy();
+  option3["key"] = option1.copy();
+
+  EXPECT_EQ(option2.str(), "");
+  EXPECT_EQ(option3.str(), "");
+  EXPECT_EQ(option3["key"].str(), "key");
+}
+
 TEST_F(OptionsTest, AssignSection) {
   Options option1, option2;
 
@@ -669,6 +682,19 @@ TEST_F(OptionsTest, AssignSection) {
 
   EXPECT_EQ(option2["key"].as<int>(), 42);
   EXPECT_TRUE(option2["key"].isValue());
+}
+
+TEST_F(OptionsTest, AssignSectionName) {
+  Options option1, option2, option3;
+
+  option1["key"] = 42;
+
+  option2 = option1.copy();
+  option3 = option1["key"].copy();
+
+  EXPECT_EQ(option2.str(), "");
+  EXPECT_EQ(option2["key"].str(), "key");
+  EXPECT_EQ(option3.str(), "");
 }
 
 TEST_F(OptionsTest, AssignSectionReplace) {
@@ -700,6 +726,22 @@ TEST_F(OptionsTest, AssignSubSection) {
   option2["key2"] = option1.copy();
 
   EXPECT_EQ(option2["key2"]["key1"].as<int>(), 42);
+}
+
+TEST_F(OptionsTest, AssignSubSectionName) {
+  Options option1, option2, option3, option4;
+
+  option1["key1"] = 42;
+  option2["key2"] = option1.copy();
+  option3["key3"] = option2["key2"].copy();
+  option4 = option2["key2"].copy();
+
+  EXPECT_EQ(option2["key2"].str(), "key2");
+  EXPECT_EQ(option2["key2"]["key1"].str(), "key2:key1");
+  EXPECT_EQ(option3["key3"]["key2"].str(), "key3:key2");
+  EXPECT_EQ(option3["key3"]["key2"]["key1"].str(), "key3:key2:key1");
+  EXPECT_EQ(option4.str(), "");
+  EXPECT_EQ(option4["key1"].str(), "key1");
 }
 
 TEST_F(OptionsTest, AssignSubSectionParent) {
@@ -1099,7 +1141,9 @@ value6 = 12
 }
 
 TEST_F(OptionsTest, InvalidFormat) {
-  EXPECT_THROW(fmt::format("{:nope}", Options{}), fmt::format_error);
+  EXPECT_THROW([[maybe_unused]] auto none =
+                   fmt::format(fmt::runtime("{:nope}"), Options{}),
+               fmt::format_error);
 }
 
 TEST_F(OptionsTest, FormatValue) {
@@ -1438,4 +1482,66 @@ TEST_F(OptionsTest, BoolComparisonLT) {
 TEST_F(OptionsTest, BoolCompound) {
   ASSERT_TRUE(Options("true & !false").as<bool>());
   ASSERT_TRUE(Options("2 > 1 & 2 < 3").as<bool>());
+}
+
+TEST_F(OptionsTest, Iterate) {
+  Options option{{{"value1", 1}, {"value2", 2}}};
+
+  for (auto& [name, value] : option) {
+    value.force(value.as<int>() + 1);
+  }
+
+  ASSERT_EQ(option["value1"], 2);
+  ASSERT_EQ(option["value2"], 3);
+}
+
+TEST_F(OptionsTest, MatrixInt) {
+  constexpr int nx = 2;
+  constexpr int ny = 3;
+  Matrix<int> matrix_in(nx, ny);
+  int count = 0;
+
+  for (int i = 0; i < nx; ++i) {
+    for (int j = 0; j < ny; ++j) {
+      matrix_in(i, j) = ++count;
+    }
+  }
+
+  Options options{{"int_matrix", matrix_in}};
+
+  const auto matrix_out = options["int_matrix"].as<Matrix<int>>();
+  ASSERT_EQ(matrix_out(nx - 1, ny - 1), matrix_in(nx - 1, ny - 1));
+}
+
+TEST_F(OptionsTest, TensorIntToTensorBoutReal) {
+  constexpr int nx = 2;
+  constexpr int ny = 3;
+  constexpr int nz = 4;
+
+  Tensor<int> t_int(nx, ny, nz);
+  int count = 0;
+  for (int i = 0; i < nx; ++i) {
+    for (int j = 0; j < ny; ++j) {
+      for (int k = 0; k < nz; ++k) {
+        t_int(i, j, k) = ++count;
+      }
+    }
+  }
+
+  Options option = t_int;
+
+  // Convert to Tensor<BoutReal>
+  Tensor<BoutReal> t_boutreal = option.as<Tensor<BoutReal>>();
+
+  std::tuple<int, int, int> expected_shape{nx, ny, nz};
+  ASSERT_EQ(expected_shape, t_boutreal.shape());
+
+  count = 0;
+  for (int i = 0; i < nx; ++i) {
+    for (int j = 0; j < ny; ++j) {
+      for (int k = 0; k < nz; ++k) {
+        ASSERT_FLOAT_EQ(t_boutreal(i, j, k), static_cast<BoutReal>(++count));
+      }
+    }
+  }
 }

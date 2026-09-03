@@ -1,8 +1,8 @@
+/// \file
+/// Perpendicular Laplacian inversion. Parallel code using FFT
+/// and tridiagonal solver.
+
 /**************************************************************************
- * Perpendicular Laplacian inversion. Parallel code using FFT
- * and tridiagonal solver.
- *
- **************************************************************************
  * Copyright 2010 B.D.Dudson, S.Farley, M.V.Umansky, X.Q.Xu
  *
  * Contact: Ben Dudson, bd512@york.ac.uk
@@ -29,13 +29,24 @@ class LaplacePCR;
 #ifndef BOUT_PCR_H
 #define BOUT_PCR_H
 
-#include <bout/dcomplex.hxx>
+#include <bout/build_defines.hxx>
 #include <bout/invert_laplace.hxx>
+
+#if BOUT_USE_METRIC_3D
+
+namespace {
+const RegisterUnavailableLaplace
+    registerlaplacepcr(LAPLACE_PCR, "BOUT++ was configured with 3D metrics");
+}
+
+#else
+
+#include <bout/dcomplex.hxx>
 #include <bout/options.hxx>
 #include <bout/utils.hxx>
 
 namespace {
-RegisterLaplace<LaplacePCR> registerlaplacepcr(LAPLACE_PCR);
+const RegisterLaplace<LaplacePCR> registerlaplacepcr(LAPLACE_PCR);
 }
 
 class LaplacePCR : public Laplacian {
@@ -174,5 +185,7 @@ private:
 
   bool dst{false};
 };
+
+#endif // BOUT_USE_METRIC_3D
 
 #endif // BOUT_PCR_H

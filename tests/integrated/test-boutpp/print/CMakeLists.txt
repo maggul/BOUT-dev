@@ -1,5 +1,5 @@
-bout_add_integrated_test(test-boutpp-print
-  USE_RUNTEST
+bout_add_integrated_test(
+  test-boutpp-print
   EXTRA_FILES test/BOUT.inp test.py
   REQUIRES BOUT_ENABLE_PYTHON
 )

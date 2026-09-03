@@ -3,7 +3,7 @@
  *
  * Interface for mesh classes. Contains standard variables and useful
  * routines.
- * 
+ *
  * Changelog
  * =========
  *
@@ -11,7 +11,7 @@
  *     * Removing coordinate system into separate
  *       Coordinates class
  *     * Adding index derivative functions from derivs.cxx
- * 
+ *
  * 2010-06 Ben Dudson, Sean Farley
  *     * Initial version, adapted from GridData class
  *     * Incorporates code from topology.cpp and Communicator
@@ -20,7 +20,7 @@
  * Copyright 2010-2025 BOUT++ contributors
  *
  * Contact: Ben Dudson, dudson2@llnl.gov
- * 
+ *
  * This file is part of BOUT++.
  *
  * BOUT++ is free software: you can redistribute it and/or modify
@@ -38,6 +38,7 @@
  *
  **************************************************************************/
 
+#include "bout/boutexception.hxx"
 class Mesh;
 
 #ifndef BOUT_MESH_H
@@ -49,6 +50,8 @@ class Mesh;
 #include <bout/index_derivs_interface.hxx>
 #include <bout/mpi_wrapper.hxx>
 
+#include "bout/array.hxx"
+#include "bout/bout_enum_class.hxx"
 #include "bout/bout_types.hxx"
 #include "bout/field2d.hxx"
 #include "bout/field3d.hxx"
@@ -79,6 +82,13 @@ class BoundaryRegionPar;
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
+
+class BoundaryRegion;
+namespace bout::boundary {
+class BoundaryRegionFCI;
+}
+class GridDataSource;
 
 class MeshFactory : public Factory<Mesh, MeshFactory, GridDataSource*, Options*> {
 public:
@@ -180,6 +190,9 @@ public:
   /// @returns zero if successful, non-zero on failure
   int get(bool& bval, const std::string& name, bool def = false);
 
+  int get(Array<int>& var, const std::string& name);
+  int get(Array<BoutReal>& var, const std::string& name);
+
   /// Get a Field2D from the input source
   /// including communicating guard cells
   ///
@@ -272,6 +285,16 @@ public:
     communicate(g);
   }
 
+  /// Communicate Fields without calculating the parallel slices
+  template <typename... Ts>
+  void communicate_no_slices(Ts&... ts) {
+    FieldGroup g(ts...);
+    const bool old = calcParallelSlices_on_communicate;
+    calcParallelSlices_on_communicate = false;
+    communicate(g);
+    calcParallelSlices_on_communicate = old;
+  }
+
   template <typename... Ts>
   void communicateXZ(Ts&... ts) {
     FieldGroup g(ts...);
@@ -300,11 +323,6 @@ public:
   ///
   /// @param g  The group of fields to communicate. Guard cells will be modified
   void communicateYZ(FieldGroup& g);
-
-  /*!
-   * Communicate an X-Z field
-   */
-  virtual void communicate(FieldPerp& f);
 
   /*!
    * Send a list of FieldData objects
@@ -354,10 +372,14 @@ public:
 
   // non-local communications
 
-  virtual int getNXPE() = 0;       ///< The number of processors in the X direction
-  virtual int getNYPE() = 0;       ///< The number of processors in the Y direction
-  virtual int getXProcIndex() = 0; ///< This processor's index in X direction
-  virtual int getYProcIndex() = 0; ///< This processor's index in Y direction
+  virtual int getNXPE() const = 0;       ///< The number of processors in the X direction
+  virtual int getNYPE() const = 0;       ///< The number of processors in the Y direction
+  virtual int getNZPE() const = 0;       ///< The number of processors in the Z direction
+  virtual int getXProcIndex() const = 0; ///< This processor's index in X direction
+  virtual int getYProcIndex() const = 0; ///< This processor's index in Y direction
+  virtual int getZProcIndex() const = 0; ///< This processor's index in Z direction
+  /// The index of a processor with given X, Y, and Z index
+  virtual int getProcIndex(int X, int Y, int Z) const = 0;
 
   // X communications
   virtual bool firstX()
@@ -367,8 +389,6 @@ public:
 
   /// Domain is periodic in X?
   bool periodicX{false};
-
-  int NXPE, PE_XIND; ///< Number of processors in X, and X processor index
 
   /// Send a buffer of data to processor at X index +1
   ///
@@ -403,6 +423,7 @@ public:
   } ///< Return communicator containing all processors in X
   virtual MPI_Comm getXcomm(int jy) const = 0; ///< Return X communicator
   virtual MPI_Comm getYcomm(int jx) const = 0; ///< Return Y communicator
+  virtual MPI_Comm getXZcomm() const = 0;      ///< Communicator in X-Z
 
   /// Return pointer to the mesh's MPI Wrapper object
   MpiWrapper& getMpi() { return *mpi; }
@@ -474,21 +495,25 @@ public:
 
   /// Is there a boundary on the lower guard cells in Y
   /// on any processor along the X direction?
-  bool hasBndryLowerY();
+  virtual bool hasBndryLowerY() const = 0;
 
   /// Is there a boundary on the upper guard cells in Y
   /// on any processor along the X direction?
-  bool hasBndryUpperY();
+  virtual bool hasBndryUpperY() const = 0;
   // Boundary regions
 
   /// Return a vector containing all the boundary regions on this processor
-  virtual std::vector<BoundaryRegion*> getBoundaries() = 0;
+  virtual std::vector<std::shared_ptr<BoundaryRegionBase>> getBoundaries() const = 0;
 
   /// Get the set of all possible boundaries in this configuration
-  virtual std::set<std::string> getPossibleBoundaries() const { return {}; }
+  virtual std::set<std::string> getPossibleBoundaries() const {
+    throw BoutException("Not implemented for this mesh");
+  };
 
   /// Add a boundary region to this processor
-  virtual void addBoundary(BoundaryRegion* UNUSED(bndry)) {}
+  virtual void addBoundary(std::shared_ptr<BoundaryRegionBase> UNUSED(bndry)) {
+    throw BoutException("This has never been implemented");
+  };
 
   /// Get the list of parallel boundary regions. The option specifies with
   /// region to get. Default is to get all regions. All possible options are
@@ -498,20 +523,20 @@ public:
   /// mesh->getBoundariesPar(Mesh::BoundaryParType::all)
   /// get only xout:
   /// mesh->getBoundariesPar(Mesh::BoundaryParType::xout)
-  virtual std::vector<std::shared_ptr<BoundaryRegionPar>>
-  getBoundariesPar(BoundaryParType type = BoundaryParType::all) = 0;
+  virtual std::vector<std::shared_ptr<bout::boundary::BoundaryRegionFCI>>
+  getBoundariesPar(BoundaryParType type = BoundaryParType::all) const = 0;
 
   /// Add a parallel(Y) boundary to this processor
-  virtual void addBoundaryPar(std::shared_ptr<BoundaryRegionPar> UNUSED(bndry),
-                              BoundaryParType UNUSED(type)) {}
-
-  /// Branch-cut special handling (experimental)
-  virtual Field3D smoothSeparatrix(const Field3D& f) { return f; }
+  virtual void
+  addBoundaryPar(std::shared_ptr<bout::boundary::BoundaryRegionFCI> UNUSED(bndry),
+                 BoundaryParType UNUSED(type)) {}
 
   virtual BoutReal GlobalX(int jx) const = 0;      ///< Continuous X index between 0 and 1
   virtual BoutReal GlobalY(int jy) const = 0;      ///< Continuous Y index (0 -> 1)
+  virtual BoutReal GlobalZ(int jz) const = 0;      ///< Continuous Z index (0 -> 1)
   virtual BoutReal GlobalX(BoutReal jx) const = 0; ///< Continuous X index between 0 and 1
   virtual BoutReal GlobalY(BoutReal jy) const = 0; ///< Continuous Y index (0 -> 1)
+  virtual BoutReal GlobalZ(BoutReal jz) const = 0; ///< Continuous Z index (0 -> 1)
 
   //////////////////////////////////////////////////////////
 
@@ -601,7 +626,7 @@ public:
   virtual int getLocalZIndexNoBoundaries(int zglobal) const = 0;
 
   /// Size of the mesh on this processor including guard/boundary cells
-  int LocalNx, LocalNy, LocalNz;
+  int LocalNx{0}, LocalNy{0}, LocalNz{0};
 
   /// Local ranges of data (inclusive), excluding guard cells
   int xstart, xend, ystart, yend, zstart, zend;
@@ -616,25 +641,7 @@ public:
     return getCoordinatesSmart(location).get();
   };
 
-  std::shared_ptr<Coordinates>
-  getCoordinatesSmart(const CELL_LOC location = CELL_CENTRE) {
-    ASSERT1(location != CELL_DEFAULT);
-    ASSERT1(location != CELL_VSHIFT);
-
-    auto found = coords_map.find(location);
-    if (found != coords_map.end()) {
-      // True branch most common, returns immediately
-      return found->second;
-    }
-
-    // No coordinate system set. Create default
-    // Note that this can't be allocated here due to incomplete type
-    // (circular dependency between Mesh and Coordinates)
-    auto inserted = coords_map.emplace(location, nullptr);
-    inserted.first->second = createDefaultCoordinates(location);
-    inserted.first->second->geometry(false);
-    return inserted.first->second;
-  }
+  std::shared_ptr<Coordinates> getCoordinatesSmart(CELL_LOC location = CELL_CENTRE);
 
   std::shared_ptr<Coordinates>
   getCoordinatesConst(const CELL_LOC location = CELL_CENTRE) const {
@@ -652,7 +659,7 @@ public:
   /// Returns the non-CELL_CENTRE location
   /// allowed as a staggered location
   static CELL_LOC getAllowedStaggerLoc(DIRECTION direction) {
-    AUTO_TRACE();
+
     switch (direction) {
     case (DIRECTION::X):
       return CELL_XLOW;
@@ -670,7 +677,7 @@ public:
   /// Returns the number of grid points in the
   /// particular direction
   int getNpoints(DIRECTION direction) const {
-    AUTO_TRACE();
+
     switch (direction) {
     case (DIRECTION::X):
       return LocalNx;
@@ -688,7 +695,7 @@ public:
   /// Returns the number of guard points in the
   /// particular direction
   int getNguard(DIRECTION direction) const {
-    AUTO_TRACE();
+
     switch (direction) {
     case (DIRECTION::X):
       return xstart;
@@ -767,7 +774,7 @@ public:
   void addRegionPerp(const std::string& region_name, const Region<IndPerp>& region);
 
   /// Converts an Ind2D to an Ind3D using calculation
-  Ind3D ind2Dto3D(const Ind2D& ind2D, int jz = 0) {
+  Ind3D ind2Dto3D(const Ind2D& ind2D, int jz = 0) const {
     return {ind2D.ind * LocalNz + jz, LocalNy, LocalNz};
   }
 
@@ -783,6 +790,12 @@ public:
   Ind3D indPerpto3D(const IndPerp& indPerp, int jy = 0) {
     int jz = indPerp.z();
     return {(indPerp.ind - jz) * LocalNy + LocalNz * jy + jz, LocalNy, LocalNz};
+  }
+
+  BOUT_HOST_DEVICE int flatIndPerpto3D(const int& flatIndPerp, const int nz,
+                                       int jy = 0) const {
+    int jz = flatIndPerp % nz;
+    return (flatIndPerp - jz) * LocalNy + LocalNz * jy + jz;
   }
 
   /// Converts an Ind3D to an Ind2D representing a 2D index using a lookup -- to be used with care
@@ -805,15 +818,17 @@ protected:
   /// Mesh options section
   Options* options{nullptr};
 
+private:
   /// Set whether to call calcParallelSlices on all communicated fields (true) or not (false)
   bool calcParallelSlices_on_communicate{true};
 
+protected:
   /// Read a 1D array of integers
   const std::vector<int> readInts(const std::string& name, int n);
 
   /// Calculates the size of a message for a given x and y range
-  int msg_len(const std::vector<FieldData*>& var_list, int xge, int xlt, int yge,
-              int ylt);
+  int msg_len(const std::vector<Field*>& var_list, int xge, int xlt, int yge,
+              int ylt) const;
 
   /// Initialise derivatives
   void derivs_init(Options* options);
@@ -834,7 +849,8 @@ public:
   // Switch for communication of corner guard and boundary cells
   const bool include_corner_cells;
 
-  std::optional<size_t> getCommonRegion(std::optional<size_t>, std::optional<size_t>);
+  std::optional<size_t> getCommonRegion(std::optional<size_t> lhs,
+                                        std::optional<size_t> rhs);
   size_t getRegionID(const std::string& region) const;
   const Region<Ind3D>& getRegion(size_t RegionID) const { return region3D[RegionID]; }
   const Region<Ind3D>& getRegion(std::optional<size_t> RegionID) const {
