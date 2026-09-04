@@ -93,6 +93,7 @@ constexpr auto SOLVEREULER = "euler";
 constexpr auto SOLVERRK3SSP = "rk3ssp";
 constexpr auto SOLVERPOWER = "power";
 constexpr auto SOLVERARKODE = "arkode";
+constexpr auto SOLVERARKODEMRI = "arkode_mri";
 constexpr auto SOLVERIMEXBDF2 = "imexbdf2";
 constexpr auto SOLVERSNES = "snes";
 constexpr auto SOLVERRKGENERIC = "rkgeneric";
@@ -317,8 +318,20 @@ public:
   /// Same but fur implicit timestep counter - for IMEX
   int resetRHSCounter_i();
 
+  /// Same but for slow explicit timestep counter - for MRI IMEX
+  int resetRHSCounter_se();
+  /// Same but for slow implicit timestep counter - for MRI IMEX
+  int resetRHSCounter_si();
+  /// Same but for fast explicit timestep counter - for MRI IMEX
+  int resetRHSCounter_fe();
+  /// Same but for fast implicit timestep counter - for MRI IMEX
+  int resetRHSCounter_fi();
+
   /// Test if this solver supports split operators (e.g. implicit/explicit)
   bool splitOperator();
+
+  /// Test if this solver supports split operators (e.g. implicit/explicit)
+  bool splitOperatorMRI();
 
   bool canReset{false};
 
@@ -550,11 +563,19 @@ protected:
   bool initialised{false};
   /// If calling user RHS for the first time
   bool first_rhs_call{true};
+  bool first_rhs_s_call{false};
+  bool first_rhs_f_call{false};
 
   /// Current simulation time
   BoutReal simtime{0.0};
 
   /// Run the user's RHS function
+  int run_rhs_se(BoutReal t, bool linear = false);
+  int run_rhs_si(BoutReal t, bool linear = false);
+  int run_rhs_fe(BoutReal t, bool linear = false);
+  int run_rhs_fi(BoutReal t, bool linear = false);
+  int run_rhs_s(BoutReal t, bool linear = false);
+  int run_rhs_f(BoutReal t, bool linear = false);
   int run_rhs(BoutReal t, bool linear = false);
   /// Calculate only the convective parts
   int run_convective(BoutReal t, bool linear = false);
@@ -589,8 +610,13 @@ protected:
 
   /// Do we have a user preconditioner?
   bool hasPreconditioner();
+  bool hasPreconditionerFast();
+  bool hasPreconditionerSlow();
+
   /// Run the user preconditioner
   int runPreconditioner(BoutReal time, BoutReal gamma, BoutReal delta);
+  int runPreconditionerFast(BoutReal time, BoutReal gamma, BoutReal delta);
+  int runPreconditionerSlow(BoutReal time, BoutReal gamma, BoutReal delta);
 
   /// Do we have a user Jacobian?
   bool hasJacobian();
@@ -681,6 +707,15 @@ private:
   int rhs_ncalls_e{0};
   /// Number of calls to the implicit (diffusive) RHS function
   int rhs_ncalls_i{0};
+  /// number of RHS calls for slow explicit timescale
+  int rhs_ncalls_se = 0;
+  /// number of RHS calls for slow implicit timescale
+  int rhs_ncalls_si = 0;
+  /// number of RHS calls for fast explicit timescale
+  int rhs_ncalls_fe = 0;
+  /// number of RHS calls for fast implicit timescale
+  int rhs_ncalls_fi = 0;
+
   /// Default sampling rate at which to call monitors - same as output to screen
   int default_monitor_period{1};
   /// timestep - shouldn't be changed after init is called.

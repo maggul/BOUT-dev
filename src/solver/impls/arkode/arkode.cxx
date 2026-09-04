@@ -125,6 +125,21 @@ ArkodeSolver::ArkodeSolver(Options* opts)
               .doc("Set timestep adaptivity function: pid, pi, i, explicit_gustafsson,  "
                    "implicit_gustafsson, imex_gustafsson.")
               .withDefault(AdapMethod::PID)),
+      small_nef((*options)["small_nef"]
+              .doc("Threshold for “multiple” successive error failures")
+              .withDefault(2)),
+      etamxf((*options)["etamxf"]
+              .doc("Maximum step size growth factor upon multiple successive failures")
+              .withDefault(0.3)),
+      eta_min((*options)["eta_min"]
+              .doc("Minimum value of step size growth factor upon a failure")
+              .withDefault(0.1)),
+      mx_growth((*options)["mx_growth"]
+              .doc("Maximum allowed growth factor in step size between consecutive steps")
+              .withDefault(20.0)),
+      error_bias((*options)["error_bias"]
+              .doc("Bias factor to slightly exaggerate the temporal error")
+              .withDefault(1.0)),
       abstol((*options)["atol"].doc("Absolute tolerance").withDefault(1.0e-12)),
       reltol((*options)["rtol"].doc("Relative tolerance").withDefault(1.0e-5)),
       use_vector_abstol((*options)["use_vector_abstol"]
@@ -157,6 +172,25 @@ ArkodeSolver::ArkodeSolver(Options* opts)
       nvector_type((*options)["nvector"]
                        .doc("N_Vector backend to use: sundials or manyvector")
                        .withDefault(NVectorType::Sundials)),
+      print_allstats((*options)["print_allstats"]
+                         .doc("Print all integrator stats at each evolve call")
+                         .withDefault(false)),
+      use_temporal_filtering((*options)["use_temporal_filtering"]
+                             .doc("Use temporal filtering of solution")
+                             .withDefault(false)),
+      temp_filtering(),
+      filtering_type((*options)["filtering_type"]
+                     .doc("Type of temporal filtering to perform: None, EMA, SRA")
+                     .withDefault(FilteringType::EMA)),
+      tau_mean((*options)["tau_mean"]
+                .doc("Interval over which means are calculated")
+                .withDefault(10.0)),
+      mean_start_time((*options)["mean_start_time"]
+                      .doc("Time at which averaging is allowed to start")
+                      .withDefault(0.0)),
+      lambda((*options)["lambda"]
+             .doc("Relaxation parameter for temporal filtering")
+             .withDefault(0.01)),
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
       optimize(
           (*options)["optimize"].doc("Use ARKode optimal parameters").withDefault(false)),
@@ -308,6 +342,11 @@ int ArkodeSolver::init() {
 
   if (ARKodeSetAdaptivityAdjustment(arkode_mem, 0) != ARK_SUCCESS) {
     throw BoutException("ARKodeSetAdaptivityAdjustment failed\n");
+  }
+
+  if (SUNAdaptController_SetErrorBias(controller, error_bias)
+      != ARK_SUCCESS) {
+    throw BoutException("SUNAdaptController_SetErrorBias failed\n");
   }
 #else
   int adap_method_int;
@@ -492,6 +531,43 @@ int ArkodeSolver::init() {
     }
   }
 
+  // Enable temporal filtering if requested
+  if (use_temporal_filtering) {
+    if (filtering_type == FilteringType::None) {
+      filtering_type = FilteringType::EMA;
+      output.write("\tTemporal filtering type is None. Using EMA by default\n");
+    }
+    output.write("\tUsing temporal filtering of solution\n");
+    temp_filtering.reset_state();
+    temp_filtering.initialize(uvec);
+    temp_filtering.configure(filtering_type, tau_mean, mean_start_time);
+  }
+
+  // Specifies the threshold for “multiple” successive error failures 
+  // before the etamxf parameter from ARKodeSetMaxEFailGrowth() is applied.
+  if (ARKodeSetSmallNumEFails(arkode_mem, small_nef) != ARK_SUCCESS) {
+    throw BoutException("ARKodeSetSmallNumEFails failed\n");
+  }
+
+  // Specifies the maximum step size growth factor upon multiple 
+  // successive accuracy-based error failures in the solver.
+  if (ARKodeSetMaxEFailGrowth(arkode_mem, etamxf) != ARK_SUCCESS) {
+    throw BoutException("ARKodeSetMaxEFailGrowth failed\n");
+  }
+
+  // Specifies the minimum allowed reduction factor in step size 
+  // between step attempts, resulting from a temporal error failure 
+  // in the integration process.
+  if (ARKodeSetMinReduction(arkode_mem, eta_min) != ARK_SUCCESS) {
+    throw BoutException("ARKodeSetMinReduction failed\n");
+  }
+
+  // Specifies the maximum allowed growth factor in step size 
+  // between consecutive steps in the integration process.
+   if (ARKodeSetMaxGrowth(arkode_mem, mx_growth) != ARK_SUCCESS) {
+     throw BoutException("ARKodeSetMaxGrowth failed\n");
+  }
+
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
   if (optimize) {
     output.write("\tUsing ARKode inbuilt optimization\n");
@@ -576,9 +652,16 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
   pre_ncalls = 0;
 
   int flag;
+  int mpi_rank;
   if (!monitor_timestep) {
     // Run in normal mode
     flag = ARKodeEvolve(arkode_mem, tout, uvec, &simtime, ARK_NORMAL);
+    if (flag != ARK_SUCCESS) {
+      output_error.write("ERROR ARKODE solve failed at t = {:e}, flag = {:d}\n",
+                         simtime, flag);
+      return -1.0;
+    }
+    apply_temporal_filtering(simtime, uvec);
   } else {
     // Run in single step mode, to call timestep monitors
     BoutReal internal_time;
@@ -593,6 +676,7 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
                            internal_time, flag);
         return -1.0;
       }
+      apply_temporal_filtering(internal_time, uvec);
 
       // Call timestep monitor
       call_timestep_monitors(internal_time, internal_time - last_time);
@@ -600,6 +684,22 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
     // Get output at the desired time
     flag = ARKodeGetDky(arkode_mem, tout, 0, uvec);
     simtime = tout;
+    if (flag != ARK_SUCCESS) {
+      output_error.write("ERROR ARKodeGetDky failed at t = {:e}, flag = {:d}\n",
+                         simtime, flag);
+      return -1.0;
+    }
+  }
+
+  if (print_allstats) {
+    bout::globals::mpi->MPI_Comm_rank(BoutComm::get(), &mpi_rank);
+    if (mpi_rank == 0) {
+      flag = ARKodePrintAllStats(arkode_mem, stdout, SUN_OUTPUTFORMAT_TABLE);
+      if (flag != ARK_SUCCESS) {
+        output_error.write("ERROR ARKodePrintAllStats failed with the flag = {:d}\n", flag);
+            return -1.0;
+        }
+    }
   }
 
   // Copy variables
@@ -607,11 +707,6 @@ BoutReal ArkodeSolver::run(BoutReal tout) {
   // Call rhs function to get extra variables at this time
   run_rhs(simtime);
   // run_diffusive(simtime);
-  if (flag != ARK_SUCCESS) {
-    output_error.write("ERROR ARKODE solve failed at t = {:e}, flag = {:d}\n", simtime,
-                       flag);
-    return -1.0;
-  }
 
   return simtime;
 }
@@ -839,6 +934,45 @@ void ArkodeSolver::loop_abstol_values_op(Ind2D UNUSED(i2d), BoutReal* abstolvec_
       abstolvec_data[p] = f3dtols[i];
       p++;
     }
+  }
+}
+
+void ArkodeSolver::apply_temporal_filtering(BoutReal internal_time,
+                                            N_Vector uvec)
+{
+  if (!use_temporal_filtering) {
+    return;
+  }
+
+  // Update the temporal filtering 
+  temp_filtering.update(internal_time, uvec);
+
+  // If no mean is available yet, do nothing
+  if (!temp_filtering.has_mean()) {
+    return;
+  }
+
+  int flag;
+    
+  // Get the current mean vector
+  N_Vector u_mean = temp_filtering.get_mean_vector();
+
+  // Apply the temporal filtering
+  // Gently relax the solution towards the mean
+  // Set u = (1 - lambda) * u + lambda * u_mean
+  N_VLinearSum(1.0 - lambda, uvec, lambda, u_mean, uvec);
+
+  // Reset ARKode with the new filtered state
+  flag = ARKodeReset(arkode_mem, internal_time, uvec);
+  if (flag != ARK_SUCCESS) {
+    throw BoutException("ARKodeReset failed in temporal filtering\n");
+  }
+
+  // For EMA: we keep averaging continuously (no reset).
+  // For SRA: enforce finite averaging windows of length tau_mean
+  // by restarting the averaging window when tau_mean_cur is equal to tau_mean
+  if (filtering_type == FilteringType::SRA && temp_filtering.window_full()) {
+    temp_filtering.restart_window(internal_time);
   }
 }
 
