@@ -18,9 +18,9 @@
  * =========
  *
  **************************************************************************
- * Copyright 2018 B.D.Dudson, M. Loiten, J. Omotani
+ * Copyright 2018 - 2026 BOUT++ contributors
  *
- * Contact: Ben Dudson, benjamin.dudson@york.ac.uk
+ * Contact: Ben Dudson, dudson2@llnl.gov
  *
  * This file is part of BOUT++.
  *
@@ -37,112 +37,18 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with BOUT++.  If not, see <http://www.gnu.org/licenses/>.
  *
- * ## Explanation of the procedure:
- * A way to invert the equation
- * \f$\Omega^D = \nabla\cdot(n\nabla_\perp \phi)\f$
- * invented by Naulin, V.
- * In an orthogonal system, we have that:
- *
- * \f{eqnarray}{
- * \Omega^D &=& \nabla\cdot(n\nabla_\perp \phi)\\
- *       &=& n \nabla_\perp^2 \phi + \nabla n\cdot\nabla_\perp \phi\\
- *       &=& n \Omega + \nabla n\cdot\nabla_\perp \phi\\
- *       &=& n \Omega + \nabla_\perp n\cdot\nabla_\perp \phi
- * \f}
- *
- * Rearranging gives
- *
- * \f{eqnarray}{
- * \Omega  &=& \frac{\Omega^D}{n} - \nabla_\perp \ln(n)\cdot\nabla_\perp \phi\\
- * \nabla_\perp^2 \phi
- * &=& \frac{\Omega^D}{n} - \nabla_\perp \ln(n)\cdot\nabla_\perp \phi
- * \f}
- *
- * In fact we allow for the slightly more general form
- *
- * \f{eqnarray}{
- * \nabla_\perp^2 \phi + <\frac{A}{D}>\phi
- * &=& rhs/D - \frac{1}{D\,C1} \nabla_\perp C2\cdot\nabla_\perp \phi - (\frac{A}{D} - <\frac{A}{D}>)*\phi
- * \f}
- *
- * The iteration can be under-relaxed to help it converge. Amount of under-relaxation is
- * set by the parameter 'underrelax_factor'. 0<underrelax_factor<=1, with
- * underrelax_factor=1 corresponding to no under-relaxation. The amount of
- * under-relaxation is temporarily increased if the iteration starts diverging, the
- * starting value uof underrelax_factor can be set with the initial_underrelax_factor
- * option.
- *
- * The iteration now works as follows:
- *      1. Get the vorticity from
- *         \code{.cpp}
- *         vort = (vortD/n) - grad_perp(ln_n)*grad_perp(phiCur)
- *         [Delp2(phiNext) + 1/DC(C2*D)*grad_perp(DC(C2))*grad_perp(phiNext) + DC(A/D)*phiNext
- *          = b(phiCur)
- *          = (rhs/D) - (1/C1/D*grad_perp(C2)*grad_perp(phiCur) - 1/DC(C2*D)*grad_perp(DC(C2))*grad_perp(phiCur)) - (A/D - DC(A/D))*phiCur]
- *         \endcode
- *         where phiCur is phi of the current iteration
- *         [and DC(f) is the constant-in-z component of f]
- *      2. Invert \f$phi\f$ to find the voricity using
- *         \code{.cpp}
- *         phiNext = invert_laplace_perp(vort)
- *         [set Acoef of laplace_perp solver to DC(A/D)
- *          and C1coef of laplace_perp solver to DC(C1*D)
- *          and C2coef of laplace_perp solver to DC(C2)
- *          then phiNext = invert_laplace_perp(underrelax_factor*b(phiCur) - (1-underrelax_factor)*b(phiPrev))]
- *          where b(phiPrev) is the previous rhs value, which (up to rounding errors) is
- *          the same as the lhs of the direct solver applied to phiCur.
- *         \endcode
- *         where phiNext is the newly obtained \f$phi\f$
- *      3. Calculate the error at phi=phiNext
- *         \code{.cpp}
- *         error3D = Delp2(phiNext) + 1/C1*grad_perp(C2)*grad_perp(phiNext) + A/D*phiNext - rhs/D
- *                 = b(phiCur) - b(phiNext)
- *         as b(phiCur) = Delp2(phiNext) + 1/DC(C2*D)*grad_perp(DC(C2))*grad_perp(phiNext) + DC(A/D)*phiNext
- *         up to rounding errors
- *         \endcode
- *      4. Calculate the infinity norms of the error
- *         \code{.cpp}
- *         EAbsLInf = max(error3D)
- *         ERelLInf = EAbsLInf/sqrt( max((rhs/D)^2) )
- *         \endcode
- *      5. Check whether
- *         \code{.cpp}
- *         EAbsLInf > atol
- *         \endcode
- *          * If yes
- *              * Check whether
- *                \code{.cpp}
- *                ERelLInf > rtol
- *                \endcode
- *              * If yes
- *                  * Check whether
- *                  \code{.cpp}
- *                  EAbsLInf > EAbsLInf(previous step)
- *                  \endcode
- *                    * If yes
- *                      \code{.cpp}
- *                      underrelax_factor *= 0.9
- *                      \endcode
- *                      Restart iteration
- *                    * If no
- *                      * Set
- *                        \code{.cpp}
- *                        phiCur = phiNext
- *                        \endcode
- *                        increase curCount and start from step 1
- *                      * If number of iteration is above maxit, throw exception
- *              * If no
- *                  * Stop: Function returns phiNext
- *          * if no
- *              * Stop: Function returns phiNext
  */
-// clang-format on
+
+#include "bout/build_defines.hxx"
+
+#if not BOUT_USE_METRIC_3D
 
 #include <bout/boutexception.hxx>
 #include <bout/coordinates.hxx>
 #include <bout/derivs.hxx>
 #include <bout/difops.hxx>
 #include <bout/globals.hxx>
+#include <bout/invert_laplace.hxx>
 #include <bout/mesh.hxx>
 #include <bout/sys/timer.hxx>
 
@@ -203,7 +109,7 @@ LaplaceNaulin::LaplaceNaulin(Options* opt, const CELL_LOC loc, Mesh* mesh_in,
   ASSERT0(underrelax_recovery >= 1.);
   delp2solver = create(opt->getSection("delp2solver"), location, localmesh);
   std::string delp2type;
-  opt->getSection("delp2solver")->get("type", delp2type, "cyclic");
+  opt->getSection("delp2solver")->get("type", delp2type, LaplaceFactory::default_type);
   // Check delp2solver is using an FFT scheme, otherwise it will not exactly
   // invert Delp2 and we will not converge
   ASSERT0(delp2type == "cyclic" || delp2type == "spt" || delp2type == "tri");
@@ -402,7 +308,7 @@ void LaplaceNaulin::copy_x_boundaries(Field3D& x, const Field3D& x0, Mesh* local
   if (localmesh->firstX()) {
     for (int i = localmesh->xstart - 1; i >= 0; --i) {
       for (int j = localmesh->ystart; j <= localmesh->yend; ++j) {
-        for (int k = 0; k < localmesh->LocalNz; ++k) {
+        for (int k = localmesh->zstart; k <= localmesh->zend; ++k) {
           x(i, j, k) = x0(i, j, k);
         }
       }
@@ -411,7 +317,7 @@ void LaplaceNaulin::copy_x_boundaries(Field3D& x, const Field3D& x0, Mesh* local
   if (localmesh->lastX()) {
     for (int i = localmesh->xend + 1; i < localmesh->LocalNx; ++i) {
       for (int j = localmesh->ystart; j <= localmesh->yend; ++j) {
-        for (int k = 0; k < localmesh->LocalNz; ++k) {
+        for (int k = localmesh->zstart; k <= localmesh->zend; ++k) {
           x(i, j, k) = x0(i, j, k);
         }
       }
@@ -426,3 +332,5 @@ void LaplaceNaulin::outputVars(Options& output_options,
   output_options[fmt::format("{}_mean_underrelax_counts", getPerformanceName())]
       .assignRepeat(naulinsolver_mean_underrelax_counts, time_dimension);
 }
+
+#endif

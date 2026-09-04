@@ -33,7 +33,7 @@ needed to make the solver available.
 
 .. _tab-solvers:
 .. table:: Available time integration solvers
-	   
+
    +---------------+-----------------------------------------+------------------------+
    | Name          | Description                             | Compile options        |
    +===============+=========================================+========================+
@@ -68,7 +68,7 @@ given in table :numref:`tab-solveropts`.
 
 .. _tab-solveropts:
 .. table:: Time integration solver options
-	   
+
    +--------------------------+--------------------------------------------+-------------------------------------+
    | Option                   | Description                                | Solvers used                        |
    +==========================+============================================+=====================================+
@@ -87,7 +87,10 @@ given in table :numref:`tab-solveropts`.
    +--------------------------+--------------------------------------------+-------------------------------------+
    | adaptive                 | Adapt timestep? (Y/N)                      | rk4, imexbdf2                       |
    +--------------------------+--------------------------------------------+-------------------------------------+
-   | use\_precon              | Use a preconditioner? (Y/N)                | pvode, cvode, ida, imexbdf2         |
+   | use\_precon              | Use a preconditioner? (Y/N)                | pvode, ida, imexbdf2                |
+   +--------------------------+--------------------------------------------+-------------------------------------+
+   | cvode\_precon\_method    | CVODE preconditioner: none, auto, user,   | cvode                               |
+   |                          | petsc, or bbd                              |                                     |
    +--------------------------+--------------------------------------------+-------------------------------------+
    | mudq, mldq               | BBD preconditioner settings                | pvode, cvode, ida                   |
    +--------------------------+--------------------------------------------+-------------------------------------+
@@ -104,12 +107,39 @@ given in table :numref:`tab-solveropts`.
    +--------------------------+--------------------------------------------+-------------------------------------+
    | diagnose                 | Collect and print additional diagnostics   | cvode, imexbdf2, beuler             |
    +--------------------------+--------------------------------------------+-------------------------------------+
+   | nvector                  | ``N_Vector`` backend for SUNDIALS solvers: | cvode, ida, arkode                  |
+   |                          | ``sundials`` or ``manyvector``             |                                     |
+   +--------------------------+--------------------------------------------+-------------------------------------+
 
 |
 
 The most commonly changed options are the absolute and relative solver
 tolerances, ``atol`` and ``rtol`` which should be varied to check
 convergence.
+
+SUNDIALS ``N_Vector`` backends
+------------------------------
+
+The SUNDIALS-based solvers ``cvode``, ``ida``, and ``arkode`` can select
+the ``N_Vector`` backend at runtime using ``solver:nvector``:
+
+.. code-block:: cfg
+
+    [solver]
+    type = cvode
+    nvector = sundials
+
+Valid values are:
+
+- ``sundials`` uses the standard SUNDIALS parallel ``N_Vector``. This is the
+  default.
+- ``manyvector`` uses the BOUT++ field-backed custom ``N_Vector`` built on top
+  of SUNDIALS ManyVector support.
+
+The ``manyvector`` option is only available when BOUT++ was built with SUNDIALS
+ManyVector support. If ``solver:nvector=manyvector`` is selected in a build
+that does not provide this support, solver initialisation will throw an
+exception.
 
 CVODE
 -----
@@ -143,6 +173,31 @@ many iterations are needed to solve the linear system. If the number of
 iterations becomes large, this may be an indication that the system is
 poorly conditioned, and a preconditioner might help improve performance.
 See :ref:`sec-preconditioning`.
+
+CVODE preconditioning is controlled using ``solver:cvode_precon_method``:
+
+- ``none`` (default): Disable preconditioning.
+- ``auto``: Prefer a user-supplied preconditioner if provided, then PETSc
+  coloring if PETSc is available, otherwise use BBD.
+- ``user``: Require a user-supplied preconditioner.
+- ``petsc``: Require PETSc and use PETSc coloring.
+- ``bbd``: Force the built-in BBD preconditioner.
+
+For ``cvode_precon_method = petsc``, PETSc options for the internal KSP/PC can be
+set with the prefix ``cvode_petscpre_`` (either on the command line, or by putting
+prefixed keys into the ``[petsc]`` section). For example::
+
+    [petsc]
+    cvode_petscpre_ksp_type = preonly
+    cvode_petscpre_pc_type = hypre
+
+Two CVODE heuristics that control when the linear solver setup routine is called,
+and when the Jacobian/preconditioner are recomputed, can be adjusted with:
+
+- ``cvode_lsetup_frequency`` (default ``0``): Passed to ``CVodeSetLSetupFrequency``.
+  ``0`` uses the SUNDIALS default.
+- ``cvode_jac_eval_frequency`` (default ``0``): Passed to ``CVodeSetJacEvalFrequency``.
+  ``0`` uses the SUNDIALS default.
 
 CVODE can set constraints to keep some quantities positive, non-negative,
 negative or non-positive. These constraints can be activated by setting the
@@ -361,16 +416,426 @@ And the adaptive timestepping options:
 Backward Euler - SNES
 ---------------------
 
-The `beuler` or `snes` solver type (either name can be used) is
-intended mainly for solving steady-state problems, so integrates in
-time using a stable but low accuracy method (Backward Euler). It uses
-PETSc's SNES solvers to solve the nonlinear system at each timestep,
-and adjusts the internal timestep to keep the number of SNES
-iterations within a given range.
+The `beuler` or `snes` solver type (either name can be used) is a PETSc-based implicit
+solver for finding steady-state solutions to systems of partial differential equations.
+It supports multiple solution strategies including backward Euler timestepping,
+direct Newton iteration, and Pseudo-Transient Continuation (PTC) with Switched
+Evolution Relaxation (SER).
+
+Basic Configuration
+~~~~~~~~~~~~~~~~~~~
+
+The SNES solver is configured through the ``[solver]`` section of the input file:
+
+.. code-block:: ini
+
+   [solver]
+   type = snes
+
+   # Nonlinear solver settings
+   snes_type = newtonls          # anderson, newtonls, newtontr, nrichardson
+   atol = 1e-7                   # Absolute tolerance
+   rtol = 1e-6                   # Relative tolerance
+   stol = 1e-12                  # Solution change tolerance
+   max_nonlinear_iterations = 20 # Maximum SNES iterations per solve
+
+   # Linear solver settings
+   ksp_type = fgmres             # Linear solver: gmres, bicgstab, etc.
+   maxl = 20                     # Maximum linear iterations
+   pc_type = ilu                 # Preconditioner: ilu, bjacobi, hypre, etc.
+
+Timestepping Modes
+~~~~~~~~~~~~~~~~~~
+
+The solver supports several timestepping strategies controlled by ``equation_form``:
+
+**Backward Euler (default)**
+   Standard implicit backward Euler method. Good for general timestepping.
+
+   .. code-block:: ini
+
+      equation_form = rearranged_backward_euler  # Default
+
+   This method has low accuracy in time but its dissipative properties
+   are helpful when evolving to steady state solutions.
+
+**Direct Newton**
+   Solves the steady-state problem F(u) = 0 directly without timestepping.
+
+   .. code-block:: ini
+
+      equation_form = direct_newton
+
+   This method is unlikely to converge unless the system is very close
+   to steady state.
+
+**Pseudo-Transient Continuation**
+   Uses pseudo-time to guide the solution to steady state. Recommended for
+   highly nonlinear problems where Newton's method fails.
+
+   .. code-block:: ini
+
+      equation_form = pseudo_transient
+
+   This uses the same form as rearranged_backward_euler, but the time step
+   can be different for each cell.
+
+Adaptive Timestepping
+~~~~~~~~~~~~~~~~~~~~~
+
+When ``equation_form = rearranged_backward_euler`` (default), the
+solver uses global timestepping with adaptive timestep control based
+on nonlinear iteration count.
+
+.. code-block:: ini
+
+   [solver]
+   type = snes
+   equation_form = rearranged_backward_euler
+
+   # Initial and maximum timesteps
+   timestep = 1.0                         # Initial timestep
+   max_timestep = 1e10                    # Upper limit on timestep
+   dt_min_reset = 1e-6                    # Reset the solver when timestep < this
+
+   # Timestep adaptation
+   timestep_control = pid_nonlinear_its
+   target_its = 7        # Target number of nonlinear iterations
+   kP = 0.7              # Proportional gain
+   kI = 0.3              # Integral gain
+   kD = 0.2              # Derivative gain
+
+This uses a PID controller that adjusts the timestep to maintain approximately ``target_its``
+nonlinear iterations per solve.
+
+Residual Ratio
+^^^^^^^^^^^^^^
+
+This adjusts the timestep using the ratio of global residuals and a timestep factor:
+
+.. math::
+
+   dt_n = r dt_{n-1} \frac{||F(X_{n-1})||}{||F(X_{n})||
+
+so that as the residual falls the timestep :math:`dt` is increased.
+The :math:`r` parameter is input option ``timestep_factor`` that has
+default value 1.1.
+
+.. code-block:: ini
+
+   [solver]
+   timestep_control = residual_ratio  # Use global residual
+   timestep_factor = 1.1              # Constant timestep factor
+
+Threshold Controller
+^^^^^^^^^^^^^^^^^^^^
+
+An alternative adaptive strategy uses thresholds in nonlinear iterations
+to adjust the timestep:
+
+.. code-block:: ini
+
+   [solver]
+   timestep_control = threshold_nonlinear_its
+   lower_its = 3                          # Increase dt if iterations < this
+   upper_its = 10                         # Decrease dt if iterations > this
+   timestep_factor_on_lower_its = 1.4     # Growth factor
+   timestep_factor_on_upper_its = 0.9     # Reduction factor
+   timestep_factor_on_failure = 0.5       # Reduction on convergence failure
+
+The adjustments are less smooth than the default PID method, but the
+timestep is changed less frequently. This may enable the Jacobian and
+preconditioner to be used for more iterations.
+
+Output trigger
+~~~~~~~~~~~~~~
+
+The default behavior is to save outputs at a regular time interval, as
+BOUT++ solvers do. This is desirable when performing time-dependent
+simulations, but for simulations that are trying to get to steady
+state a better measure of progress is reduction of the global residual
+(norm of the time-derivatives of the system).
+
+.. code-block:: ini
+
+   [solver]
+   output_trigger = residual_ratio  # Trigger an output based on the ratio of residuals
+   output_residual_ratio = 0.5     # Output when global residual is multiplied by this
+
+With this choice, each output has a global residual that is less than
+or equal to `output_residual_ratio` times the last output global
+residual. This provides a way of measuring progress to steady state
+that is independent of time integration accuracy.
+
+Pseudo-Transient Continuation and Switched Evolution Relaxation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``equation_form = pseudo_transient`` the solver uses
+Pseudo-Transient Continuation (PTC). This is a robust numerical
+technique for solving steady-state problems that are too nonlinear for
+direct Newton iteration. Instead of solving the steady-state system
+**F(u) = 0** directly, PTC solves a modified time-dependent problem:
+
+.. math::
+
+   M(u) \frac{\partial u}{\partial \tau} + F(u) = 0
+
+where :math:`\tau` is a pseudo-time variable (not physical time) and :math:`M(u)`
+is a preconditioning matrix. As :math:`\tau \to \infty`, the solution converges
+to the steady state **F(u) = 0**.
+
+The key advantage of PTC is that it transforms a difficult root-finding problem
+into a sequence of easier initial value problems. Poor initial guesses that would
+cause Newton's method to diverge can still reach the solution via a stable
+pseudo-transient path.
+
+The Switched Evolution Relaxation (SER) method is a spatially adaptive
+variant of PTC that allows each cell to use a different
+pseudo-timestep :math:`\Delta\tau_i`. The timestep in each cell adapts
+based on the local residual, allowing the algorithm to take large
+timesteps in well-behaved regions (fast convergence), while taking
+small timesteps in difficult regions (stable advancement).  The the
+same :math:`\Delta\tau_i` is used for all equations (density,
+momentum, energy etc.) within each cell. This maintains coupling
+between temperature, pressure, and composition through the equation of
+state.
+
+**Key parameters:**
+
+``pseudo_max_ratio`` (default: 2.0)
+   Maximum allowed ratio of timesteps between neighboring cells. This prevents
+   sharp spatial gradients in convergence rate.
+
+**Example PTC configuration:**
+
+.. code-block:: ini
+
+   [solver]
+   type = snes
+   equation_form = pseudo_transient
+
+   timestep = 1.0                # Initial timestep
+
+   # SER parameters
+   timestep_control = pid_nonlinear_its  # Scale timesteps based on iterations
+   pseudo_max_ratio = 2.0         # Limit neighbor timestep ratio
+
+   # Tolerances
+   atol = 1e-7
+   rtol = 1e-6
+   stol = 1e-12
+
+SER timestep strategy
+^^^^^^^^^^^^^^^^^^^^^
+
+After each nonlinear solve the timesteps in each cell are adjusted.
+The strategy used depends on the ``pseudo_strategy`` option:
+
+**inverse_residual** (default)
+
+If ``pseudo_strategy = inverse_residual`` then the timestep is inversely
+proportional to the RMS residual in each cell.
+``pseudo_alpha`` (default: 100 × atol × timestep)
+Controls the relationship between residual and timestep. The local timestep
+is computed as:
+
+.. math::
+
+   \Delta\tau_i = \frac{\alpha}{||R_i||}
+
+Larger values allow more aggressive timestepping. The default is to use
+a fixed ``pseudo_alpha`` but a better strategy is to enable the PID controller
+that adjusts this parameter based on the nonlinear solver convergence.
+
+The timestep is limited to be between ``dt_min_reset`` and
+``max_timestep``.  In addition the timestep is limited between 0.67 ×
+previous timestep and 1.5 × previous timestep, to limit sudden changes
+in timestep.
+
+In practice this strategy seems to work well, though problems could
+arise when residuals become very small.
+
+**history_based**
+
+When ``pseudo_strategy = history_based`` the history of residuals
+within each cell is used to adjust the timestep. The key parameters
+are:
+
+``pseudo_growth_factor`` (default: 1.1)
+   Factor by which timestep increases when residual decreases successfully.
+
+``pseudo_reduction_factor`` (default: 0.5)
+   Factor by which timestep decreases when residual increases (step rejected).
+
+This method may be less susceptible to fluctuations when residuals
+become small, but tends to be slower to converge when residuals are
+large.
+
+**hybrid**
+
+When ``pseudo_strategy = hybrid`` the ``inverse_residual`` and
+``history_based`` strategies are combined: When the residuals are
+large the ``inverse_residual`` method is used, and when residuals
+become small the method switches to ``history_based``.
+
+PID Controller
+^^^^^^^^^^^^^^
+
+When using the PTC method the PID controller can be used to dynamically
+adjust ``pseudo_alpha`` depending on the nonlinearity of the system:
+
+.. code-block:: ini
+
+   [solver]
+   timestep_control = pid_nonlinear_its   # Scale global timestep using PID controller
+   target_its = 7        # Target number of nonlinear iterations
+   kP = 0.7              # Proportional gain
+   kI = 0.3              # Integral gain
+   kD = 0.2              # Derivative gain
+
+The PID controller adjusts ``pseudo_alpha``, scaling all cell
+timesteps together, to maintain approximately ``target_its`` nonlinear
+iterations per solve.
+
+With this enabled the solver uses the number of nonlinear iterations
+to scale timesteps globally, and residuals to scale timesteps locally.
+Note that the PID controller has no effect on the ``history_based``
+strategy because that strategy does not use ``pseudo_alpha``.
+
+Jacobian Finite Difference with Coloring
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The default and recommended approach for most problems:
+
+.. code-block:: ini
+
+   [solver]
+   use_coloring = true               # Enable (default)
+   lag_jacobian = 5                  # Reuse Jacobian for this many iterations
+
+   # Stencil shape (determines Jacobian sparsity pattern)
+   stencil:taxi = 2                  # Taxi-cab distance (default)
+   stencil:square = 0                # Square stencil extent
+   stencil:cross = 0                 # Cross stencil extent
+
+The coloring algorithm exploits the sparse structure of the Jacobian to reduce
+the number of function evaluations needed for finite differencing.
+
+Jacobian coloring stencil
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The stencil used to create the Jacobian colouring can be varied,
+depending on which numerical operators are in use. It is important to
+note that the coloring won't work for every problem: It assumes that
+each evolving quantity is coupled to all other evolving quantities on
+the same grid cell, and on all the neighbouring grid cells. If the RHS
+function includes Fourier transforms, or matrix inversions
+(e.g. potential solves) then these will introduce longer-range
+coupling and the Jacobian calculation will give spurious
+results. Generally the method will then fail to converge. Two
+solutions are to a) switch to matrix-free (``matrix_free=true``),
+or b) solve the matrix inversion as a constraint.
+
+
+``solver:stencil:cross = N``
+e.g. for N == 2
+
+.. code-block:: bash
+
+        *
+        *
+    * * x * *
+        *
+        *
+
+
+``solver:stencil:square = N``
+e.g. for N == 2
+
+.. code-block:: bash
+
+    * * * * *
+    * * * * *
+    * * x * *
+    * * * * *
+    * * * * *
+
+``solver:stencil:taxi = N``
+e.g. for N == 2
+
+.. code-block:: bash
+
+        *
+      * * *
+    * * x * *
+      * * *
+        *
+
+Setting ``solver:force_symmetric_coloring = true``, will make sure
+that the jacobian colouring matrix is symmetric.  This will often
+include a few extra non-zeros that the stencil will miss otherwise
+
+
+Variable Scaling
+~~~~~~~~~~~~~~~~
+
+There may be differences of many orders of magnitude between your
+variables or within variables across the domain. This can result in a
+particular area of the domain for a particular variable dominating the
+residual in the nonlinear solve because its residual has the largest
+absolute value, even if not the largest relative value. As a
+consequence, tighter tolerances will be needed to ensure other
+variables and parts of the domain are solved to sufficient
+accuracy. The ``scale_vars`` option can help address this by
+renormalising all variables to be of order unity across the entire
+domain.
+
+.. code-block:: ini
+
+   scale_vars = true
+   rescale_period = 30  # Maximum number of time-steps taken before rescaling the variables
+   rescale_threshold = 100.  # Approximate overall change to variables permitted before rescaling
+
+It has been found that scaling variables in this way allows
+simulations to run with much looser tolerances than would otherwise be
+possible (e.g., ``rtol = 1e-5`` and ``atol = 1e-3``). Four-times
+speedups have been observed by doing this. Once a steady-state has
+been reached the simulation can be run for a further few time-steps
+with tighter tolerances to improve the accuracy.
+
+Diagnostics and Monitoring
+---------------------------
+
+.. code-block:: ini
+
+   [solver]
+   diagnose = true                # Print iteration info to screen
+   diagnose_failures = true       # Detailed diagnostics on failures
+
+When ``equation_form = pseudo_transient``, the solver saves additional diagnostic fields:
+
+- ``snes_pseudo_residual``: Local residual in each cell
+- ``snes_pseudo_timestep``: Local pseudo-timestep in each cell
+- ``snes_pseudo_alpha``: Global timestep scaling
+
+These can be visualized to understand convergence behavior and identify
+problematic regions.
+
+The residuals from the last nonlinear solve are also saved with names
+``resid_<var name>``. Plotting these can help to understand which
+variables and parts of the domain are controlling convergence.
+
+Summary of solver options
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 +---------------------------+---------------+----------------------------------------------------+
 | Option                    | Default       |Description                                         |
 +===========================+===============+====================================================+
+| pseudo_time               | false         | Pseudo-Transient Continuation (PTC) method, using  |
+|                           |               | a different timestep for each cell.                |
++---------------------------+---------------+----------------------------------------------------+
+| pseudo_max_ratio          | 2.            | Maximum timestep ratio between neighboring cells   |
++---------------------------+---------------+----------------------------------------------------+
 | snes_type                 | newtonls      | PETSc SNES nonlinear solver (try anderson, qn)     |
 +---------------------------+---------------+----------------------------------------------------+
 | ksp_type                  | gmres         | PETSc KSP linear solver                            |
@@ -427,16 +892,7 @@ The default `newtonls` SNES type can be very effective if combined
 with Jacobian coloring: The coloring enables the Jacobian to be
 calculated relatively efficiently; once a Jacobian matrix has been
 calculated, effective preconditioners can be used to speed up
-convergence.  It is important to note that the coloring assumes a star
-stencil and so won't work for every problem: It assumes that each
-evolving quantity is coupled to all other evolving quantities on the
-same grid cell, and on all the neighbouring grid cells. If the RHS
-function includes Fourier transforms, or matrix inversions
-(e.g. potential solves) then these will introduce longer-range
-coupling and the Jacobian calculation will give spurious
-results. Generally the method will then fail to converge. Two
-solutions are to a) switch to matrix-free (``matrix_free=true``), or b)
-solve the matrix inversion as a constraint.
+convergence.
 
 The `SNES type
 <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/SNES/SNESType.html>`_
@@ -456,50 +912,7 @@ Preconditioner types:
    Enable with command-line args ``-pc_type hypre -pc_hypre_type euclid -pc_hypre_euclid_levels k``
    where ``k`` is the level (1-8 typically).
 
-Jacobian coloring stencil
-~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The stencil used to create the Jacobian colouring can be varied,
-depending on which numerical operators are in use.
-
-
-``solver:stencil:cross = N``
-e.g. for N == 2
-
-.. code-block:: bash
-
-        *
-        *
-    * * x * *
-        *
-        *
-
-
-``solver:stencil:square = N``
-e.g. for N == 2
-
-.. code-block:: bash
-
-    * * * * *
-    * * * * *
-    * * x * *
-    * * * * *
-    * * * * *
-
-``solver:stencil:taxi = N``
-e.g. for N == 2
-
-.. code-block:: bash
-
-        *
-      * * *
-    * * x * *
-      * * *
-        *
-
-Setting ``solver:force_symmetric_coloring = true``, will make sure
-that the jacobian colouring matrix is symmetric.  This will often
-include a few extra non-zeros that the stencil will miss otherwise
 
 ODE integration
 ---------------
@@ -836,7 +1249,7 @@ then in the ``BOUT.inp`` settings file switch on the preconditioner
 
     [solver]
     type = cvode          # Need CVODE or PETSc
-    use_precon = true     # Use preconditioner
+    cvode_precon_method = user   # Use user-supplied preconditioner
     rightprec = false     # Use Right preconditioner (default left)
 
 Jacobian function
@@ -952,7 +1365,9 @@ implement the outputMonitor method of PhysicsModel::
     int outputMonitor(BoutReal simtime, int iter, int nout)
 
 The first input is the current simulation time, the second is the output
-number, and the last is the total number of outputs requested.
+number, and the last is the total number of outputs requested. If an initial
+dump is written, it is output number ``0``. Solver output steps are numbered
+from ``1`` to ``nout``, so ``iter == nout`` indicates the final output.
 This method is called by a monitor object PhysicsModel::modelMonitor, which
 writes the restart files at the same time. You can change the frequency at which
 the monitor is called by calling, in PhysicsModel::init::
@@ -977,7 +1392,9 @@ returns an int::
 
 The first input is the solver object, the second is the current
 simulation time, the third is the output number, and the last is the
-total number of outputs requested. To get the solver to call this
+total number of outputs requested. As for ``outputMonitor()``, output number
+``0`` is reserved for the initial dump when it is written, and solver output
+steps are numbered from ``1`` to ``NOUT``. To get the solver to call this
 function every output time, define a `MyOutputMonitor` object as a member of your
 PhysicsModel::
 
@@ -1044,28 +1461,33 @@ This may in some cases be less efficient.
 Implementation internals
 ------------------------
 
+.. todo:: Update these docs for modern API
+
 The solver is the interface between BOUT++ and the time-integration
-code such as SUNDIALS. All solvers implement the `Solver`
-class interface (see ``src/solver/generic_solver.hxx``).
+code such as SUNDIALS. All solvers implement the `Solver` class
+interface.
 
 First all the fields which are to be evolved need to be added to the
-solver. These are always done in pairs, the first specifying the field,
-and the second the time-derivative::
+solver with `Solver::add`::
 
-    void add(Field2D &v, Field2D &F_v, const char* name);
+    virtual void add(Field2D &v, const std::string& name);
 
-This is normally called in the `PhysicsModel::init` initialisation routine.
-Some solvers (e.g. IDA) can support constraints, which need to be added
-in the same way as evolving fields::
+This is normally called in the `PhysicsModel::init` initialisation
+routine. This is a virtual function so that individual solver
+implementations can keep track of additional information if required.
 
-    bool constraints();
-    void constraint(Field2D &v, Field2D &C_v, const char* name);
+Some solvers (e.g. IDA) can support constraints, which need
+to be added in the same way as evolving fields::
 
-The ``constraints()`` function tests whether or not the current solver
-supports constraints. The format of ``constraint(...)`` is the same as
-``add``, except that now the solver will attempt to make ``C_v`` zero.
-If ``constraint`` is called when the solver doesn’t support them then an
-error should occur.
+    virtual bool constraints();
+    virtual void constraint(Field2D &v, Field2D &C_v, std::string name);
+
+The `Solver::constraints` function tests whether or not the current
+solver supports constraints. The format of `Solver::constraint`
+similar to `Solver::add`, except that it takes a second argument,
+``C_v``, which the solver will attempt to make zero. If ``constraint``
+is called when the solver doesn’t support them then an error will
+occur.
 
 If the physics model implements a preconditioner or Jacobian-vector
 multiplication routine, these can be passed to the solver during
@@ -1082,23 +1504,16 @@ be ignored.
 Once the problem to be solved has been specified, the solver can be
 initialised using::
 
-    int init();
+    virtual int init();
 
-which returns an error code (0 on success). This is currently called in
-:doc:`bout++.cxx<../_breathe_autogen/file/bout_09_09_8cxx>`::
+which returns an error code (0 on success). This is function is
+essential for implementations that must allocate memory based on the
+total number of fields being evolved, as this won't be known until
+after all calls to `Solver::add` and `Solver::constraint` have been
+handled. One of the very first things overrides for ``init`` should do
+is to call the base implementation `Solver::init` to handle the
+generic initialisation.
 
-    if (solver.init()) {
-      output.write("Failed to initialise solver. Aborting\n");
-      return(1);
-    }
-
-which passes the (physics module) RHS function `PhysicsModel::rhs` to the
-solver along with the number and size of the output steps.
-
-::
-
-    typedef int (*MonitorFunc)(BoutReal simtime, int iter, int NOUT);
-    int run(MonitorFunc f);
 
 .. [1]
    Taken from a talk by L.Chacon available here
