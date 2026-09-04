@@ -44,6 +44,7 @@ RegisterUnavailableSolver
 #include "bout/bout_types.hxx"
 #include "bout/region.hxx"
 #include "bout/sundials_backports.hxx"
+#include "temporal_filtering.hxx"
 
 #include <nvector/nvector_parallel.h>
 #include <sundials/sundials_config.h>
@@ -158,6 +159,16 @@ private:
   BoutReal cfl_frac;
   /// Timestep adaptivity function
   AdapMethod adap_method;
+  /// Threshold for “multiple” successive error failures
+  int small_nef;
+  /// Maximum step size growth factor upon multiple successive failures
+  BoutReal etamxf;
+  /// Minimum value of step size growth factor upon a failure
+  BoutReal eta_min;
+  /// Maximum allowed growth factor in step size between consecutive steps
+  BoutReal mx_growth;
+  /// Bias factor to slightly exaggerate the temporal error
+  BoutReal error_bias;
   /// Absolute tolerance
   BoutReal abstol;
   /// Relative tolerance
@@ -182,6 +193,24 @@ private:
   bool use_jacobian;
   /// N_Vector backend to use
   NVectorType nvector_type;
+  /// ARKodePrintAllStats: print all available integrator statistics at the end of the run
+  bool print_allstats;
+  /// Temporal filtering of solution
+  /// - Whether to use temporal filtering
+  bool use_temporal_filtering{false};
+  /// Temporal filtering object
+  TemporalFiltering temp_filtering;
+  /// Type of temporal filtering to use
+  FilteringType filtering_type{FilteringType::None};
+  /// Interval over which means are calculated
+  /// - EMA: time scale of the exponential memory
+  /// - SRA: window length of each running-average block
+  BoutReal tau_mean{0.0};
+  /// Time at which averaging starts
+  BoutReal mean_start_time{0.0};
+  /// Relaxation/nudging parameter for temporal filtering
+  BoutReal lambda{0.0};
+
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
   /// Use ARKode optimal parameters
   bool optimize;
@@ -205,6 +234,7 @@ private:
     return SundialsNVectorInterface(*this, suncontext, nvector_type);
   }
 
+  void apply_temporal_filtering(BoutReal internal_time, N_Vector uvec);
   /// SPGMR solver structure
   SUNLinearSolver sun_solver{nullptr};
   /// Solver for implicit stages

@@ -11,7 +11,7 @@
  *    * Initial version
  *
  **************************************************************************
- * Copyright 2013 B.D.Dudson
+ * Copyright 2013-2025 BOUT++ contributors
  *
  * Contact: Ben Dudson, bd512@york.ac.uk
  *

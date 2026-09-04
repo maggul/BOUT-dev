@@ -47,17 +47,22 @@ class Mesh;
 #include "bout/array.hxx"
 #include "bout/bout_enum_class.hxx"
 #include "bout/bout_types.hxx"
-#include "bout/coordinates.hxx" // Coordinates class
 #include "bout/field2d.hxx"
 #include "bout/field3d.hxx"
 #include "bout/field_data.hxx"
-#include "bout/fieldgroup.hxx"
-#include "bout/generic_factory.hxx"
-#include "bout/index_derivs_interface.hxx"
-#include "bout/mpi_wrapper.hxx"
 #include "bout/options.hxx"
-#include "bout/region.hxx"
+
+#include "bout/fieldgroup.hxx"
+
+class BoundaryRegion;
+class BoundaryRegionPar;
+
 #include "bout/sys/range.hxx" // RangeIterator
+
+#include <bout/griddata.hxx>
+
+#include "bout/coordinates.hxx" // Coordinates class
+
 #include "bout/unused.hxx"
 
 #include <map>

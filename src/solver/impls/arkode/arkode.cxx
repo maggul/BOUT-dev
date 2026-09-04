@@ -50,7 +50,7 @@
 #include <arkode/arkode_arkstep.h>
 #include <arkode/arkode_bbdpre.h>
 #include <arkode/arkode_ls.h>
-#if SUNDIALS_CONTROLLER_SUPPORT
+#if ARKODE_CONTROLLER_SUPPORT
 #include <sunadaptcontroller/sunadaptcontroller_imexgus.h>
 #include <sunadaptcontroller/sunadaptcontroller_soderlind.h>
 #endif

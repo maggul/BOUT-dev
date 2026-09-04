@@ -11,7 +11,6 @@
 #include <bout/fieldgroup.hxx>
 #include <bout/generic_factory.hxx>
 #include <bout/globals.hxx>
-#include <bout/griddata.hxx>
 #include <bout/mesh.hxx>
 #include <bout/msg_stack.hxx>
 #include <bout/openmpwrap.hxx>
@@ -33,6 +32,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <bout/boutcomm.hxx>
+#include <bout/output.hxx>
 
 #include "impls/bout/boutmesh.hxx"
 

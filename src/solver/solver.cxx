@@ -1623,9 +1623,12 @@ void Solver::post_rhs(BoutReal UNUSED(t)) {
 #endif
 }
 
-bool Solver::varAdded(const std::string& name) {
-  return contains(f2d, name) || contains(f3d, name) || contains(v2d, name)
-         || contains(v3d, name);
+bool Solver::hasPreconditioner() { return model->hasPrecon(); }
+bool Solver::hasPreconditionerFast() { return model->hasPreconFast(); }
+bool Solver::hasPreconditionerSlow() { return model->hasPreconSlow(); }
+
+int Solver::runPreconditioner(BoutReal time, BoutReal gamma, BoutReal delta) {
+  return model->runPrecon(time, gamma, delta);
 }
 
 bool Solver::hasPreconditioner() { return model->hasPrecon(); }
@@ -1645,7 +1648,13 @@ int Solver::runPreconditionerSlow(BoutReal time, BoutReal gamma, BoutReal delta)
 }
 
 bool Solver::hasJacobian() { return model->hasJacobian(); }
+
 int Solver::runJacobian(BoutReal time) { return model->runJacobian(time); }
+
+bool Solver::varAdded(const std::string& name) {
+  return contains(f2d, name) || contains(f3d, name) || contains(v2d, name)
+         || contains(v3d, name);
+}
 
 // Add source terms to time derivatives
 void Solver::add_mms_sources(BoutReal t) {
