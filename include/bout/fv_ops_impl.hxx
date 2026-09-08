@@ -633,7 +633,8 @@ Field3D Div_f_v(const Field3D& n_in, const Vector3D& v, bool bndry_flux) {
 ///                          Already includes area factor * flux
 template <typename CellEdges>
 Field3D Div_par_mod(const Field3D& f_in, const Field3D& v_in,
-                    const Field3D& wave_speed_in, Field3D& flow_ylow, bool fixflux) {
+                    const Field3D& wave_speed_in, Field3D& flow_ylow, bool fixflux,
+                    bool dissipative) {
 
   Coordinates* coord = f_in.getCoordinates();
   ASSERT1_FIELDS_COMPATIBLE(f_in, v_in);
@@ -661,10 +662,24 @@ Field3D Div_par_mod(const Field3D& f_in, const Field3D& v_in,
                    - 0.25 * (f_in[i] + f_down[iym]) * (v_in[i] + v_down[iym])
                          * coord->cell_area_ylow()[i])
                   / coord->cell_volume()[i];
+
+      if (dissipative) {
+        const BoutReal amax = BOUTMAX(fabs(wave_speed_in[i]), fabs(v_in[i]),
+                                      fabs(v_up[iyp]), fabs(v_down[iym]));
+        result[i] += (0.5 * amax * (f_in[i] - f_up[iyp]) * coord->cell_area_yhigh()[i]
+                      + 0.5 * amax * (f_in[i] - f_down[iym]) * coord->cell_area_ylow()[i])
+                     / coord->cell_volume()[i];
+      }
     }
     return result;
   }
   ASSERT1_FIELDS_COMPATIBLE(f_in, wave_speed_in);
+
+  // Throw error when not Fci
+  if (dissipative) {
+    throw BoutException("Using dissipative flag in Div_par_mod but no Fci parallel "
+                        "transform. This flag will have no impact on the simulation");
+  }
 
   const Mesh* mesh = f_in.getMesh();
 
@@ -1108,22 +1123,14 @@ Field3D Div_par_fvv_heating(const Field3D& f_in, const Field3D& v_in,
         // so calculate inside the k loop.
 
         // For right cell boundaries
-        BoutReal common_factor =
-            (coord->J(i, j, k) + coord->J(i, j + 1, k))
-            / (sqrt(coord->g_22(i, j, k)) + sqrt(coord->g_22(i, j + 1, k)));
+        const BoutReal area_rp = coord->cell_area_yhigh()(i, j, k);
 
-        const BoutReal flux_factor_rc =
-            common_factor / (coord->dy(i, j, k) * coord->J(i, j, k));
-        const BoutReal area_rp =
-            common_factor * coord->dx(i, j + 1, k) * coord->dz(i, j + 1, k);
+        const BoutReal flux_factor_rc = area_rp / coord->cell_volume()(i, j, k);
 
         // For left cell boundaries
-        common_factor = (coord->J(i, j, k) + coord->J(i, j - 1, k))
-                        / (sqrt(coord->g_22(i, j, k)) + sqrt(coord->g_22(i, j - 1, k)));
+        const BoutReal area_lc = coord->cell_area_ylow()(i, j, k);
 
-        const BoutReal flux_factor_lc =
-            common_factor / (coord->dy(i, j, k) * coord->J(i, j, k));
-        const BoutReal area_lc = common_factor * coord->dx(i, j, k) * coord->dz(i, j, k);
+        const BoutReal flux_factor_lc = area_lc / coord->cell_volume()(i, j, k);
 
         ////////////////////////////////////////////
         // Reconstruct f at the cell faces
@@ -1185,7 +1192,7 @@ Field3D Div_par_fvv_heating(const Field3D& f_in, const Field3D& v_in,
           result(i, j, k) += (actual_ke - expected_ke) * flux_factor_rc;
 
           // Final flow through boundary is the expected value
-          flow_ylow(i, j + 1, k) += expected_ke * area_rp; //expected_ke * area_rp;
+          flow_ylow(i, j + 1, k) += expected_ke * area_rp;
 
         } else {
           // Maximum wave speed in the two cells
