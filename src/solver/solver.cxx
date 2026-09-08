@@ -1326,7 +1326,7 @@ int Solver::run_rhs_fi(BoutReal t, bool linear) {
 }
 
 int Solver::run_rhs_s(BoutReal t, bool linear) {
-  int status;
+  int status = 0;
 
   Timer timer("rhs");
 
@@ -1335,8 +1335,6 @@ int Solver::run_rhs_s(BoutReal t, bool linear) {
     linear = false;
     first_rhs_call = false;
   }
-
-  pre_rhs(t);
 
   // Run both parts
 
@@ -1347,13 +1345,19 @@ int Solver::run_rhs_s(BoutReal t, bool linear) {
 
   save_vars(tmp.begin()); // Copy variables into tmp
   pre_rhs(t);
-  status = model->runRHS_se(t, linear);
+  auto part_status = model->runRHS_se(t, linear);
+  if (status == 0) {
+    status = part_status;
+  }
   post_rhs(t); // Check variables, apply boundary conditions
 
   load_vars(tmp.begin());   // Reset variables
   save_derivs(tmp.begin()); // Save time derivatives
   pre_rhs(t);
-  status = model->runRHS_si(t, linear);
+  part_status = model->runRHS_si(t, linear);
+  if (status == 0) {
+    status = part_status;
+  }
   post_rhs(t);
   save_derivs(tmp2.begin()); // Save time derivatives
   for (BoutReal *t = tmp.begin(), *t2 = tmp2.begin(); t != tmp.end(); ++t, ++t2) {
@@ -1370,7 +1374,7 @@ int Solver::run_rhs_s(BoutReal t, bool linear) {
 }
 
 int Solver::run_rhs_f(BoutReal t, bool linear) {
-  int status;
+  int status = 0;
 
   Timer timer("rhs");
 
@@ -1379,8 +1383,6 @@ int Solver::run_rhs_f(BoutReal t, bool linear) {
     linear = false;
     first_rhs_call = false;
   }
-
-  pre_rhs(t);
 
   // Run both parts
 
@@ -1391,13 +1393,19 @@ int Solver::run_rhs_f(BoutReal t, bool linear) {
 
   save_vars(tmp.begin()); // Copy variables into tmp
   pre_rhs(t);
-  status = model->runRHS_fe(t, linear);
+  auto part_status = model->runRHS_fe(t, linear);
+  if (status == 0) {
+    status = part_status;
+  }
   post_rhs(t); // Check variables, apply boundary conditions
 
   load_vars(tmp.begin());   // Reset variables
   save_derivs(tmp.begin()); // Save time derivatives
   pre_rhs(t);
-  status = model->runRHS_fi(t, linear);
+  part_status = model->runRHS_fi(t, linear);
+  if (status == 0) {
+    status = part_status;
+  }
   post_rhs(t);
   save_derivs(tmp2.begin()); // Save time derivatives
   for (BoutReal *t = tmp.begin(), *t2 = tmp2.begin(); t != tmp.end(); ++t, ++t2) {
@@ -1414,7 +1422,7 @@ int Solver::run_rhs_f(BoutReal t, bool linear) {
 }
 
 int Solver::run_rhs(BoutReal t, bool linear) {
-  int status;
+  int status = 0;
 
   Timer timer("rhs");
 
@@ -1429,42 +1437,61 @@ int Solver::run_rhs(BoutReal t, bool linear) {
     // Run all four parts
 
     int nv = getLocalN();
-    // Create temporary arrays for system state
-    Array<BoutReal> tmp(nv);
-    Array<BoutReal> tmp2(nv);
-    Array<BoutReal> tmp3(nv);
+    // Reuse the same state for each MRI sub-RHS so each part sees the same input.
+    Array<BoutReal> state(nv);
+    Array<BoutReal> deriv_sum(nv);
+    Array<BoutReal> deriv_part(nv);
 
-    save_vars(tmp.begin()); // Copy variables into tmp
+    save_vars(state.begin()); // Copy variables into state
 
+    load_vars(state.begin());
     pre_rhs(t);
-    status = model->runRHS_fe(t, linear);
+    auto part_status = model->runRHS_fe(t, linear);
+    if (status == 0) {
+      status = part_status;
+    }
     post_rhs(t);               // Check variables, apply boundary conditions
-    save_derivs(tmp2.begin()); // Save time derivatives
+    save_derivs(deriv_sum.begin()); // Save time derivatives
 
+    load_vars(state.begin());
     pre_rhs(t);
-    status = model->runRHS_fi(t, linear);
+    part_status = model->runRHS_fi(t, linear);
+    if (status == 0) {
+      status = part_status;
+    }
     post_rhs(t);
-    save_derivs(tmp3.begin()); // Save time derivatives
-    for (BoutReal *t3 = tmp3.begin(), *t2 = tmp2.begin(); t3 != tmp3.end(); ++t3, ++t2) {
-      *t3 += *t2;
+    save_derivs(deriv_part.begin()); // Save time derivatives
+    for (BoutReal *sum = deriv_sum.begin(), *part = deriv_part.begin();
+         sum != deriv_sum.end(); ++sum, ++part) {
+      *sum += *part;
     }
 
+    load_vars(state.begin());
     pre_rhs(t);
-    status = model->runRHS_se(t, linear);
+    part_status = model->runRHS_se(t, linear);
+    if (status == 0) {
+      status = part_status;
+    }
     post_rhs(t);
-    save_derivs(tmp2.begin()); // Save time derivatives
-    for (BoutReal *t3 = tmp3.begin(), *t2 = tmp2.begin(); t3 != tmp3.end(); ++t3, ++t2) {
-      *t3 += *t2;
+    save_derivs(deriv_part.begin()); // Save time derivatives
+    for (BoutReal *sum = deriv_sum.begin(), *part = deriv_part.begin();
+         sum != deriv_sum.end(); ++sum, ++part) {
+      *sum += *part;
     }
 
+    load_vars(state.begin());
     pre_rhs(t);
-    status = model->runRHS_si(t, linear);
-    post_rhs(t);
-    save_derivs(tmp2.begin()); // Save time derivatives
-    for (BoutReal *t3 = tmp3.begin(), *t2 = tmp2.begin(); t3 != tmp3.end(); ++t3, ++t2) {
-      *t3 += *t2;
+    part_status = model->runRHS_si(t, linear);
+    if (status == 0) {
+      status = part_status;
     }
-    load_derivs(tmp3.begin()); // Put back time-derivatives
+    post_rhs(t);
+    save_derivs(deriv_part.begin()); // Save time derivatives
+    for (BoutReal *sum = deriv_sum.begin(), *part = deriv_part.begin();
+         sum != deriv_sum.end(); ++sum, ++part) {
+      *sum += *part;
+    }
+    load_derivs(deriv_sum.begin()); // Put back time-derivatives
     rhs_ncalls_fe++;
     rhs_ncalls_fi++;
     rhs_ncalls_se++;

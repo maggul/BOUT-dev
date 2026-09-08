@@ -1035,18 +1035,24 @@ void RunMetrics::outputVars(Options& output_options) const {
 }
 
 void RunMetrics::calculateDerivedMetrics() {
-  // Terrible hack avoid divide-by-zero, needed because SLEPc solver
-  // doesn't call `run_rhs` which increments `ncalls`. Better fix is
-  // change `Solver::addMonitor` API to take a name so that we can
-  // replace `BoutMonitor` with a different implementation. Currently
-  // not possible because `Solver::removeMonitor` needs the pointer to
-  // the specific instance
-  if (ncalls == 0) {
-    return;
+  wtime_per_rhs = 0.0;
+  wtime_per_rhs_e = 0.0;
+  wtime_per_rhs_i = 0.0;
+
+  const auto total_ncalls =
+      (ncalls > 0) ? ncalls : (ncalls_se + ncalls_si + ncalls_fe + ncalls_fi);
+  const auto explicit_ncalls = (ncalls_e > 0) ? ncalls_e : (ncalls_se + ncalls_fe);
+  const auto implicit_ncalls = (ncalls_i > 0) ? ncalls_i : (ncalls_si + ncalls_fi);
+
+  if (total_ncalls > 0) {
+    wtime_per_rhs = wtime / total_ncalls;
   }
-  wtime_per_rhs = wtime / ncalls;
-  wtime_per_rhs_e = wtime / ncalls_e;
-  wtime_per_rhs_i = wtime / ncalls_i;
+  if (explicit_ncalls > 0) {
+    wtime_per_rhs_e = wtime / explicit_ncalls;
+  }
+  if (implicit_ncalls > 0) {
+    wtime_per_rhs_i = wtime / implicit_ncalls;
+  }
 }
 
 void RunMetrics::writeProgress(BoutReal simtime, bool output_split,

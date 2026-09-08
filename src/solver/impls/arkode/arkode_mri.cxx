@@ -857,8 +857,8 @@ void ArkodeMRISolver::pre_f(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal
   // Save the solution from F_vars
   save_derivs(zvec);
 
-  pre_Wtime_s += bout::globals::mpi->MPI_Wtime() - tstart;
-  pre_ncalls_s++;
+  pre_Wtime_f += bout::globals::mpi->MPI_Wtime() - tstart;
+  pre_ncalls_f++;
 }
 
 /**************************************************************************
