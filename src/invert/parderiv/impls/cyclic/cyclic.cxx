@@ -14,9 +14,9 @@
  *
  *
  **************************************************************************
- * Copyright 2010 B.D.Dudson, S.Farley, M.V.Umansky, X.Q.Xu
+ * Copyright 2010 - 2026 BOUT++ contributors
  *
- * Contact: Ben Dudson, bd512@york.ac.uk
+ * Contact: Ben Dudson, dudson2@llnl.gov
  *
  * This file is part of BOUT++.
  *
@@ -40,12 +40,18 @@
 
 #if not BOUT_USE_METRIC_3D
 
+#include <bout/assert.hxx>
+#include <bout/bout_types.hxx>
 #include <bout/boutexception.hxx>
 #include <bout/constants.hxx>
+#include <bout/coordinates.hxx>
 #include <bout/cyclic_reduction.hxx>
+#include <bout/dcomplex.hxx>
 #include <bout/derivs.hxx>
 #include <bout/fft.hxx>
+#include <bout/field3d.hxx>
 #include <bout/globals.hxx>
+#include <bout/mpi_wrapper.hxx>
 #include <bout/surfaceiter.hxx>
 #include <bout/utils.hxx>
 
@@ -69,7 +75,7 @@ const Field3D InvertParCR::solve(const Field3D& f) {
 
   Field3D result = emptyFrom(f).setDirectionY(YDirectionType::Aligned);
 
-  Coordinates* coord = f.getCoordinates();
+  const Coordinates* coord = f.getCoordinates();
 
   Field3D alignedField = toFieldAligned(f, "RGN_NOBNDRY");
 

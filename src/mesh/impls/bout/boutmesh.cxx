@@ -42,6 +42,7 @@
 #include <bout/fieldgroup.hxx>
 #include <bout/globals.hxx>
 #include <bout/griddata.hxx>
+#include <bout/mpi_wrapper.hxx>
 #include <bout/msg_stack.hxx>
 #include <bout/options.hxx>
 #include <bout/output.hxx>

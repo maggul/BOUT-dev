@@ -29,7 +29,7 @@
 #ifndef BOUT_ARKODE_MRI_SOLVER_H
 #define BOUT_ARKODE_MRI_SOLVER_H
 
-#include "bout/build_config.hxx"
+#include "bout/build_defines.hxx"
 #include "bout/solver.hxx"
 
 #if not BOUT_HAS_ARKODE
@@ -42,8 +42,8 @@ RegisterUnavailableSolver
 
 #else
 
-#include "bout/sundials_backports.hxx"
 #include "temporal_filtering.hxx"
+#include "bout/sundials_backports.hxx"
 
 #if SUNDIALS_VERSION_LESS_THAN(7, 2, 0)
 

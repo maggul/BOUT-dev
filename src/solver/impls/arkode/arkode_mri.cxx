@@ -23,30 +23,40 @@
  *
  **************************************************************************/
 
-#include "bout/build_config.hxx"
+#include "bout/build_defines.hxx"
 
 #include "arkode_mri.hxx"
 
 #if BOUT_HAS_ARKODE
+#include "bout/sundials_backports.hxx"
+#if SUNDIALS_VERSION_AT_LEAST(7, 2, 0)
 
-#include "bout/bout_enum_class.hxx"
+#include "temporal_filtering.hxx"
+
+#include "bout/bout_types.hxx"
 #include "bout/boutcomm.hxx"
 #include "bout/boutexception.hxx"
 #include "bout/field3d.hxx"
+#include "bout/globals.hxx"
 #include "bout/mesh.hxx"
 #include "bout/msg_stack.hxx"
 #include "bout/options.hxx"
 #include "bout/output.hxx"
+#include "bout/solver.hxx"
 #include "bout/unused.hxx"
-#include "bout/utils.hxx"
 
+#include <arkode/arkode.h>
 #include <arkode/arkode_arkstep.h>
 #include <arkode/arkode_bbdpre.h>
+#include <arkode/arkode_mristep.h>
 #include <sundials/sundials_math.h>
 #include <sundials/sundials_types.h>
 
 #include <algorithm>
+#include <iterator>
 #include <numeric>
+#include <string>
+#include <vector>
 
 class Field2D;
 
@@ -127,21 +137,20 @@ ArkodeMRISolver::ArkodeMRISolver(Options* opts)
                     .doc("Use right preconditioning instead of left preconditioning")
                     .withDefault(false)),
       use_temporal_filtering((*options)["use_temporal_filtering"]
-                             .doc("Use temporal filtering of solution")
-                             .withDefault(false)),
-      temp_filtering(),
+                                 .doc("Use temporal filtering of solution")
+                                 .withDefault(false)),
       filtering_type((*options)["filtering_type"]
-                     .doc("Type of temporal filtering to perform: None, EMA, SRA")
-                     .withDefault(FilteringType::EMA)),
+                         .doc("Type of temporal filtering to perform: None, EMA, SRA")
+                         .withDefault(FilteringType::EMA)),
       tau_mean((*options)["tau_mean"]
-                .doc("Interval over which means are calculated")
-                .withDefault(10.0)),
+                   .doc("Interval over which means are calculated")
+                   .withDefault(10.0)),
       mean_start_time((*options)["mean_start_time"]
-                      .doc("Time at which averaging is allowed to start")
-                      .withDefault(0.0)),
+                          .doc("Time at which averaging is allowed to start")
+                          .withDefault(0.0)),
       lambda((*options)["lambda"]
-             .doc("Relaxation parameter for temporal filtering")
-             .withDefault(0.01)),
+                 .doc("Relaxation parameter for temporal filtering")
+                 .withDefault(0.01)),
       suncontext(createSUNContext(BoutComm::get())) {
   has_constraints = false; // This solver doesn't have constraints
 
@@ -206,7 +215,8 @@ int ArkodeMRISolver::init() {
   // Get total problem size
   int neq;
   if (bout::globals::mpi->MPI_Allreduce(&local_N, &neq, 1, MPI_INT, MPI_SUM,
-                                        BoutComm::get())) {
+                                        BoutComm::get())
+      != 0) {
     throw BoutException("Allreduce localN -> GlobalN failed!\n");
   }
 
@@ -258,7 +268,8 @@ int ArkodeMRISolver::init() {
 
   if (fixed_step) {
     // If not given, default to adaptive timestepping
-    const BoutReal inner_fixed_timestep = (*options)["inner_timestep"].withDefault(1.0e-5);
+    const BoutReal inner_fixed_timestep =
+        (*options)["inner_timestep"].withDefault(1.0e-5);
     if (ARKodeSetFixedStep(inner_arkode_mem, inner_fixed_timestep) != ARK_SUCCESS) {
       throw BoutException("ARKodeSetFixedStep failed\n");
     }
@@ -381,7 +392,8 @@ int ArkodeMRISolver::init() {
   //   throw BoutException("ARKodeSetMaxStep failed\n");
   // }
 
-  if (inner_treatment == MRI_Treatment::ImEx or inner_treatment == MRI_Treatment::Implicit) {
+  if (inner_treatment == MRI_Treatment::ImEx
+      or inner_treatment == MRI_Treatment::Implicit) {
     {
       output.write("\tUsing Newton iteration for inner solver\n");
 
@@ -649,17 +661,17 @@ BoutReal ArkodeMRISolver::run(BoutReal tout) {
   pre_Wtime_s = 0.0;
   pre_ncalls_s = 0;
 
-  int flag = ARKodeSetStopTime(arkode_mem, 1.0001*tout);
+  int flag = ARKodeSetStopTime(arkode_mem, 1.0001 * tout);
   if (flag != ARK_SUCCESS) {
     output_error.write("ERROR ARKodeSetStopTime failed at t = {:e}, flag = {:d}\n",
-      simtime, flag);
+                       simtime, flag);
     return -1.0;
   }
 
-  flag = ARKodeSetStopTime(inner_arkode_mem, 1.0001*tout);
+  flag = ARKodeSetStopTime(inner_arkode_mem, 1.0001 * tout);
   if (flag != ARK_SUCCESS) {
     output_error.write("ERROR ARKodeSetStopTime failed at t = {:e}, flag = {:d}\n",
-      simtime, flag);
+                       simtime, flag);
     return -1.0;
   }
 
@@ -1097,14 +1109,12 @@ void ArkodeMRISolver::loop_abstol_values_op(Ind2D UNUSED(i2d), BoutReal* abstolv
   }
 }
 
-void ArkodeMRISolver::apply_temporal_filtering(BoutReal internal_time,
-                                               N_Vector uvec)
-{
+void ArkodeMRISolver::apply_temporal_filtering(BoutReal internal_time, N_Vector uvec) {
   if (!use_temporal_filtering) {
     return;
   }
 
-  // Update the temporal filtering 
+  // Update the temporal filtering
   temp_filtering.update(internal_time, uvec);
 
   // If no mean is available yet, do nothing
@@ -1113,7 +1123,7 @@ void ArkodeMRISolver::apply_temporal_filtering(BoutReal internal_time,
   }
 
   int flag;
-    
+
   // Get the current mean vector
   N_Vector u_mean = temp_filtering.get_mean_vector();
 

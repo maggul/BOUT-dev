@@ -704,7 +704,6 @@ public:
     void setValues(BoutReal value_) {
       CALI_CXX_MARK_FUNCTION;
 
-      TRACE("HypreMatrix setting values at ({}, {})", row, column);
       ASSERT3(!positions.empty());
       std::vector<HYPRE_Complex> values;
       std::transform(
@@ -719,7 +718,6 @@ public:
 
     void addValues(BoutReal value_) {
       CALI_CXX_MARK_FUNCTION;
-      TRACE("HypreMatrix setting values at ({}, {})", row, column);
       ASSERT3(!positions.empty());
       std::vector<HYPRE_Complex> values;
       std::transform(
