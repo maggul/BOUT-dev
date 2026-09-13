@@ -212,13 +212,11 @@ def build_sdist(sdist_directory, config_settings=None):
         run(f"rm {tmp}")
 
     with open(tmp, "w") as f:
-        f.write(
-            f"""Metadata-Version: 2.1
+        f.write(f"""Metadata-Version: 2.1
 Name: {pkgname}
 Version: {getversion()}
 License-File: COPYING
-"""
-        )
+""")
     run(
         f"tar --append -f {sdist_directory}/{fname} _version.txt --xform='s\\_version.txt\\{prefix}/_version.txt\\'"
     )
@@ -262,23 +260,19 @@ def prepare_metadata_for_build_wheel(
     distinfo = f"{metadata_directory}/{thisdir}"
     mkdir_p(distinfo)
     with open(f"{distinfo}/METADATA", "w") as f:
-        f.write(
-            f"""Metadata-Version: 2.1
+        f.write(f"""Metadata-Version: 2.1
 Name: {pkgname}
 Version: {getversion()}
 License-File: COPYING
-"""
-        )
+""")
     run(f"cp LICENSE {distinfo}/COPYING")
     run(f"cp LICENSE.GPL {distinfo}/COPYING.GPL")
     with open(f"{distinfo}/WHEEL", "w") as f:
-        f.write(
-            f"""Wheel-Version: 1.0
+        f.write(f"""Wheel-Version: 1.0
 Generator: boutpp_custom_build_wheel ({getversion()})
 Root-Is-Purelib: false
 Tag: {gettag()}
-"""
-        )
+""")
 
     if record:
         with open(f"{distinfo}/RECORD", "w") as f:
