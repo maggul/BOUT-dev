@@ -201,7 +201,7 @@ CvodeSolver::CvodeSolver(Options* opts)
               .withDefault(bout::CvodeJacobianExportTrigger::linear_setup)),
 
       suncontext(createSUNContext(BoutComm::get())) {
-  has_constraints = false; // This solver doesn't have constraints
+  supports_constraints = false; // This solver doesn't have constraints
   canReset = true;
 
   if ((*options)["use_precon"].isSet()) {
