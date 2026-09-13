@@ -848,15 +848,12 @@ def Convert_grids(
         )
 
     ShiftAngle = np.zeros(nx)
-    ShiftAngle[:ixseps1] = (
-        np.sum(
-            dphidy[:ixseps1, (jyseps1_1 + 1) : (jyseps2_1 + 1)] * dy,
-            axis=1,  # Inner core
-        )
-        + np.sum(
-            dphidy[:ixseps1, (jyseps1_2 + 1) : (jyseps2_2 + 1)] * dy,
-            axis=1,  # Outer core
-        )
+    ShiftAngle[:ixseps1] = np.sum(
+        dphidy[:ixseps1, (jyseps1_1 + 1) : (jyseps2_1 + 1)] * dy,
+        axis=1,  # Inner core
+    ) + np.sum(
+        dphidy[:ixseps1, (jyseps1_2 + 1) : (jyseps2_2 + 1)] * dy,
+        axis=1,  # Outer core
     )
 
     if verbose:
