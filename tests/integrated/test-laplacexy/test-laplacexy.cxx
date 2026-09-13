@@ -24,11 +24,19 @@
  **************************************************************************/
 
 #include <bout/bout.hxx>
-#include <bout/constants.hxx>
+#include <bout/bout_types.hxx>
 #include <bout/derivs.hxx>
+#include <bout/difops.hxx>
+#include <bout/field2d.hxx>
+#include <bout/globals.hxx>
 #include <bout/initialprofiles.hxx>
 #include <bout/invert/laplacexy.hxx>
 #include <bout/options.hxx>
+#include <bout/options_io.hxx>
+#include <bout/output.hxx>
+#include <bout/vecops.hxx>
+
+#include <cstdlib>
 
 using bout::globals::mesh;
 
@@ -61,13 +69,13 @@ int main(int argc, char** argv) {
   if (include_y_derivs) {
     rhs = a * Laplace_perp(f) + Grad_perp(a) * Grad_perp(f) + b * f;
   } else {
-    rhs = a * Delp2(f, CELL_DEFAULT, false) + coords->g11 * DDX(a) * DDX(f) + b * f;
+    rhs = a * Delp2(f, CELL_DEFAULT, false) + coords->g11() * DDX(a) * DDX(f) + b * f;
   }
 
-  LaplaceXY laplacexy;
-  laplacexy.setCoefs(a, b);
+  auto laplacexy = LaplaceXY::create();
+  laplacexy->setCoefs(a, b);
 
-  Field2D solution = laplacexy.solve(rhs, 0.);
+  Field2D solution = laplacexy->solve(rhs, 0.);
   Field2D relative_error = (f - solution) / f;
   Field2D absolute_error = f - solution;
   BoutReal max_error = max(abs(absolute_error), true);
@@ -81,7 +89,7 @@ int main(int argc, char** argv) {
         a * Laplace_perp(solution) + Grad_perp(a) * Grad_perp(solution) + b * solution;
   } else {
     rhs_check = a * Delp2(solution, CELL_DEFAULT, false)
-                + coords->g11 * DDX(a) * DDX(solution) + b * solution;
+                + coords->g11() * DDX(a) * DDX(solution) + b * solution;
   }
 
   Options dump;

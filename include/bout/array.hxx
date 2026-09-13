@@ -27,14 +27,17 @@
 #define BOUT_ARRAY_H
 
 #include <algorithm>
+#include <initializer_list>
 #include <map>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #if BOUT_USE_OPENMP
 #include <omp.h>
 #endif
 
+#include "bout/build_config.hxx"
 #include "bout/build_defines.hxx"
 
 #if BOUT_HAS_UMPIRE
@@ -67,6 +70,7 @@ struct ArrayData {
     auto& rm = umpire::ResourceManager::getInstance();
 #if BOUT_HAS_CUDA
     auto allocator = rm.getAllocator(umpire::resource::Pinned);
+    //auto allocator = rm.getAllocator(umpire::resource::Unified);
 #else
     auto allocator = rm.getAllocator("HOST");
 #endif
@@ -95,7 +99,7 @@ struct ArrayData {
   }
   iterator<T> begin() const { return data; }
   iterator<T> end() const { return data + len; }
-  int size() const { return len; }
+  BOUT_FORCEINLINE int size() const { return len; }
 
   /// Copy assignment
   /// Copy the underlying data from one array to the other
@@ -186,9 +190,22 @@ public:
   Array() noexcept : ptr(nullptr) {}
 
   /*!
-   * Create an array of given length
+   * Create an array of given length.
    */
-  Array(size_type len) { ptr = get(len); }
+  Array(size_type len) : ptr(get(len)) {}
+
+  /*!
+   * Create an array with initializer list.
+   * This is explicit to avoid confusion with (size_type) constructor.
+   */
+  static Array fromValues(std::initializer_list<T> init) {
+    if (init.size() == 0) {
+      return Array();
+    }
+    Array array(init.size());
+    std::copy(init.begin(), init.end(), array.begin());
+    return array;
+  }
 
   /*!
    * Destructor. Releases the underlying dataBlock
@@ -198,7 +215,7 @@ public:
   /*!
    * Copy constructor
    */
-  Array(const Array& other) noexcept { ptr = other.ptr; }
+  Array(const Array& other) noexcept : ptr(other.ptr) {}
 
   /*!
    * Assignment operator
@@ -225,6 +242,12 @@ public:
     release(ptr);
     ptr = get(new_size);
   }
+
+  /*!
+   * Change shape of the container.
+   * Invalidates contents.
+   */
+  void reshape(std::tuple<size_type> new_shape) { reallocate(std::get<0>(new_shape)); }
 
   /*!
    * Holds a static variable which controls whether
@@ -282,6 +305,9 @@ public:
     // practice, it is so this shouldn't matter
     return ptr->size();
   }
+
+  /// Return shape of the array (the `size()` in a length-1 tuple)
+  std::tuple<size_type> shape() const { return std::make_tuple(size()); };
 
   /*!
    * Returns true if the data is unique to this Array.

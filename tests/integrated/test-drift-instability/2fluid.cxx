@@ -4,19 +4,18 @@
  *******************************************************************************/
 
 #include <bout/bout.hxx>
-#include <bout/physicsmodel.hxx>
-
 #include <bout/derivs.hxx>
+#include <bout/field2d.hxx>
 #include <bout/initialprofiles.hxx>
 #include <bout/interpolation.hxx>
 #include <bout/invert_laplace.hxx>
+#include <bout/physicsmodel.hxx>
+#include <bout/tokamak_coordinates.hxx>
 
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 
 // just define a macro for V_E dot Grad
-#define vE_Grad(f, p) (b0xGrad_dot_Grad(p, f) / coord->Bxy)
+#define vE_Grad(f, p) (b0xGrad_dot_Grad(p, f) / coord->Bxy())
 
 class TwoFluid : public PhysicsModel {
   // 2D initial profiles
@@ -40,9 +39,6 @@ class TwoFluid : public PhysicsModel {
   // pressures
   Field3D pei, pe;
   Field2D pei0, pe0;
-
-  // Metric coefficients
-  Field2D Rxy, Bpxy, Btxy, hthe;
 
   // parameters
   BoutReal Te_x, Ti_x, Ni_x, Vi_x, bmag, rho_s, fmei, AA, ZZ;
@@ -68,8 +64,6 @@ class TwoFluid : public PhysicsModel {
 
 protected:
   int init(bool UNUSED(restarting)) override {
-    Field2D I; // Shear factor
-
     output.write("Solving 6-variable 2-fluid equations\n");
 
     /************* LOAD DATA FROM GRID FILE ****************/
@@ -87,17 +81,6 @@ protected:
     // Load magnetic curvature term
     b0xcv.covariant = false;  // Read contravariant components
     mesh->get(b0xcv, "bxcv"); // b0xkappa terms
-
-    // Coordinate system
-    coord = mesh->getCoordinates();
-
-    // Load metrics
-    GRID_LOAD(Rxy);
-    GRID_LOAD(Bpxy);
-    GRID_LOAD(Btxy);
-    GRID_LOAD(hthe);
-    mesh->get(coord->dx, "dpsi");
-    mesh->get(I, "sinty");
 
     // Load normalisation values
     GRID_LOAD(Te_x);
@@ -141,14 +124,6 @@ protected:
       (*globalOptions)["aparsolver"].setConditionallyUsed();
     }
 
-    /************* SHIFTED RADIAL COORDINATES ************/
-
-    const bool ShiftXderivs = (*globalOptions)["ShiftXderivs"].withDefault(false);
-    if (ShiftXderivs) {
-      ShearFactor = 0.0; // I disappears from metric
-      b0xcv.z += I * b0xcv.x;
-    }
-
     /************** CALCULATE PARAMETERS *****************/
 
     rho_s = 1.02 * sqrt(AA * Te_x) / ZZ / bmag;
@@ -184,6 +159,20 @@ protected:
           hthe0 / rho_s);
     }
 
+    /**************** CALCULATE METRICS ******************/
+
+    const bool ShiftXderivs = (*globalOptions)["ShiftXderivs"].withDefault(false);
+    const auto tokamak_coords = bout::set_tokamak_coordinates(*mesh, rho_s, bmag / 1e4,
+                                                              ShiftXderivs, ShearFactor);
+    const auto& I = tokamak_coords.I_unnormalised;
+    coord = mesh->getCoordinates();
+
+    /************* SHIFTED RADIAL COORDINATES ************/
+
+    if (ShiftXderivs) {
+      b0xcv.z += I * b0xcv.x;
+    }
+
     /************** NORMALISE QUANTITIES *****************/
 
     output.write("\tNormalising to rho_s = {:e}\n", rho_s);
@@ -200,40 +189,9 @@ protected:
     b0xcv.y *= rho_s * rho_s;
     b0xcv.z *= rho_s * rho_s;
 
-    // Normalise geometry
-    Rxy /= rho_s;
-    hthe /= rho_s;
-    I *= rho_s * rho_s * (bmag / 1e4) * ShearFactor;
-    coord->dx /= rho_s * rho_s * (bmag / 1e4);
-
-    // Normalise magnetic field
-    Bpxy /= (bmag / 1.e4);
-    Btxy /= (bmag / 1.e4);
-    coord->Bxy /= (bmag / 1.e4);
-
     // calculate pressures
     pei0 = (Ti0 + Te0) * Ni0;
     pe0 = Te0 * Ni0;
-
-    /**************** CALCULATE METRICS ******************/
-
-    coord->g11 = SQ(Rxy * Bpxy);
-    coord->g22 = 1.0 / SQ(hthe);
-    coord->g33 = SQ(I) * coord->g11 + SQ(coord->Bxy) / coord->g11;
-    coord->g12 = 0.0;
-    coord->g13 = -I * coord->g11;
-    coord->g23 = -Btxy / (hthe * Bpxy * Rxy);
-
-    coord->J = hthe / Bpxy;
-
-    coord->g_11 = 1.0 / coord->g11 + SQ(I * Rxy);
-    coord->g_22 = SQ(coord->Bxy * hthe / Bpxy);
-    coord->g_33 = Rxy * Rxy;
-    coord->g_12 = Btxy * hthe * I * Rxy / Bpxy;
-    coord->g_13 = I * Rxy * Rxy;
-    coord->g_23 = Btxy * hthe * Rxy / Bpxy;
-
-    coord->geometry();
 
     /**************** SET EVOLVING VARIABLES *************/
 
@@ -411,7 +369,7 @@ protected:
     if (evolve_rho) {
       auto divPar_jpar_ylow = Div_par(jpar);
       mesh->communicate(divPar_jpar_ylow);
-      ddt(rho) += SQ(coord->Bxy) * interp_to(divPar_jpar_ylow, CELL_CENTRE);
+      ddt(rho) += SQ(coord->Bxy()) * interp_to(divPar_jpar_ylow, CELL_CENTRE);
     }
 
     // AJPAR

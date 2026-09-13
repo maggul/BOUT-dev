@@ -2,10 +2,10 @@
  * Class for 2D X-Z slices
  *
  **************************************************************************
- * Copyright 2010 - 2025 BOUT++ developers
+ * Copyright 2010 - 2026 BOUT++ developers
  *
  * Contact: Ben Dudson, dudson2@llnl.gov
- * 
+ *
  * This file is part of BOUT++.
  *
  * BOUT++ is free software: you can redistribute it and/or modify
@@ -23,19 +23,21 @@
  *
  **************************************************************************/
 
+#include "bout/unused.hxx"
 #include <bout/boutcomm.hxx>
 #include <bout/globals.hxx>
 
 #include <cmath>
+#include <cstddef>
+#include <optional>
 
 #include <bout/boutexception.hxx>
 #include <bout/fieldperp.hxx>
 #include <bout/mesh.hxx>
-#include <bout/msg_stack.hxx>
 #include <bout/utils.hxx>
 
 FieldPerp::FieldPerp(Mesh* localmesh, CELL_LOC location_in, int yindex_in,
-                     DirectionTypes directions)
+                     DirectionTypes directions, std::optional<size_t> UNUSED(regionID))
     : Field(localmesh, location_in, directions), yindex(yindex_in) {
   if (fieldmesh) {
     nx = fieldmesh->LocalNx;
@@ -51,7 +53,6 @@ FieldPerp::FieldPerp(Array<BoutReal> data_in, Mesh* localmesh, CELL_LOC location
                      int yindex_in, DirectionTypes directions)
     : Field(localmesh, location_in, directions), yindex(yindex_in),
       nx(fieldmesh->LocalNx), nz(fieldmesh->LocalNz), data(std::move(data_in)) {
-  TRACE("FieldPerp: Copy constructor from Array and Mesh");
 
   ASSERT1(data.size() == nx * nz);
 }
@@ -77,7 +78,7 @@ FieldPerp& FieldPerp::allocate() {
 }
 
 /***************************************************************
- *                         ASSIGNMENT 
+ *                         ASSIGNMENT
  ***************************************************************/
 
 FieldPerp& FieldPerp::operator=(const FieldPerp& rhs) {
@@ -97,7 +98,6 @@ FieldPerp& FieldPerp::operator=(const FieldPerp& rhs) {
 }
 
 FieldPerp& FieldPerp::operator=(const BoutReal rhs) {
-  TRACE("FieldPerp = BoutReal");
 
   allocate();
 
@@ -150,11 +150,43 @@ FieldPerp fromFieldAligned(const FieldPerp& f, const std::string& region) {
 
 ////////////// NON-MEMBER OVERLOADED OPERATORS //////////////
 
-// Unary minus
-FieldPerp operator-(const FieldPerp& f) { return -1.0 * f; }
-
 /////////////////////////////////////////////////
 // functions
+
+FieldPerp pow(const FieldPerp& lhs, const FieldPerp& rhs, const std::string& rgn) {
+  checkData(lhs);
+  checkData(rhs);
+  ASSERT1_FIELDS_COMPATIBLE(lhs, rhs);
+
+  FieldPerp result{emptyFrom(lhs)};
+
+  BOUT_FOR(i, result.getRegion(rgn)) { result[i] = ::pow(lhs[i], rhs[i]); }
+
+  checkData(result);
+  return result;
+}
+
+FieldPerp pow(const FieldPerp& lhs, BoutReal rhs, const std::string& rgn) {
+  checkData(lhs);
+
+  FieldPerp result{emptyFrom(lhs)};
+
+  BOUT_FOR(i, result.getRegion(rgn)) { result[i] = ::pow(lhs[i], rhs); }
+
+  checkData(result);
+  return result;
+}
+
+FieldPerp pow(BoutReal lhs, const FieldPerp& rhs, const std::string& rgn) {
+  checkData(rhs);
+
+  FieldPerp result{emptyFrom(rhs)};
+
+  BOUT_FOR(i, result.getRegion(rgn)) { result[i] = ::pow(lhs, rhs[i]); }
+
+  checkData(result);
+  return result;
+}
 
 const FieldPerp sliceXZ(const Field3D& f, int y) {
   // Source field should be valid

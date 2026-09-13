@@ -1,22 +1,25 @@
 /*
   Global Braginskii Solver (GBS) equations
-  
+
   http://infoscience.epfl.ch/record/182434/files/PPCF2012.pdf
 
   NOTES:
-  
+
   1. A slightly different definition of Poisson brackets is used in BOUT++:
      [f,g] = b.(Grad f cross Grad g) / B
-     
+
   2. This version is collocated, and uses a
      4th-order smoother to stabilise the method
  */
 
 #include "gbs.hxx"
 
+#include <bout/bout_types.hxx>
 #include <bout/derivs.hxx>
+#include <bout/field3d.hxx>
 #include <bout/field_factory.hxx>
 #include <bout/initialprofiles.hxx>
+#include <bout/tokamak_coordinates.hxx>
 
 int GBS::init(bool restarting) {
   Options* opt = Options::getRoot();
@@ -279,7 +282,7 @@ int GBS::init(bool restarting) {
     break;
   }
   case 3: { // logB, taken from mesh
-    logB = log(coords->Bxy);
+    logB = log(coords->Bxy());
     break;
   }
   default:
@@ -290,14 +293,14 @@ int GBS::init(bool restarting) {
   phiSolver = Laplacian::create(opt->getSection("phiSolver"));
   aparSolver = Laplacian::create(opt->getSection("aparSolver"));
 
-  dx4 = SQ(SQ(coords->dx));
-  dy4 = SQ(SQ(coords->dy));
-  dz4 = SQ(SQ(coords->dz));
+  dx4 = SQ(SQ(coords->dx()));
+  dy4 = SQ(SQ(coords->dy()));
+  dz4 = SQ(SQ(coords->dz()));
 
   SAVE_REPEAT(Ve);
 
   output.write("dx = {:e}, dy = {:e}, dz = {:e}\n", coords->dx(2, 2), coords->dy(2, 2),
-               coords->dz);
+               coords->dz());
   output.write("g11 = {:e}, g22 = {:e}, g33 = {:e}\n", coords->g11(2, 2),
                coords->g22(2, 2), coords->g33(2, 2));
   output.write("g12 = {:e}, g23 = {:e}\n", coords->g12(2, 2), coords->g23(2, 2));
@@ -313,58 +316,9 @@ int GBS::init(bool restarting) {
 }
 
 void GBS::LoadMetric(BoutReal Lnorm, BoutReal Bnorm) {
-  // Load metric coefficients from the mesh
-  Field2D Rxy, Bpxy, Btxy, hthe, sinty;
-  GRID_LOAD5(Rxy, Bpxy, Btxy, hthe, sinty); // Load metrics
+  const bool ShiftXderivs = Options::root()["shiftXderivs"].withDefault(false);
 
-  // Checking for dpsi and qinty used in BOUT grids
-  Field2D dx;
-  if (!mesh->get(dx, "dpsi")) {
-    output << "\tUsing dpsi as the x grid spacing\n";
-    coords->dx = dx; // Only use dpsi if found
-  } else {
-    // dx will have been read already from the grid
-    output << "\tUsing dx as the x grid spacing\n";
-  }
-
-  Rxy /= Lnorm;
-  hthe /= Lnorm;
-  sinty *= SQ(Lnorm) * Bnorm;
-  coords->dx /= SQ(Lnorm) * Bnorm;
-
-  Bpxy /= Bnorm;
-  Btxy /= Bnorm;
-  coords->Bxy /= Bnorm;
-
-  // Calculate metric components
-  bool ShiftXderivs;
-  Options::getRoot()->get("shiftXderivs", ShiftXderivs, false); // Read global flag
-  if (ShiftXderivs) {
-    sinty = 0.0; // I disappears from metric
-  }
-
-  BoutReal sbp = 1.0; // Sign of Bp
-  if (min(Bpxy, true) < 0.0) {
-    sbp = -1.0;
-  }
-
-  coords->g11 = SQ(Rxy * Bpxy);
-  coords->g22 = 1.0 / SQ(hthe);
-  coords->g33 = SQ(sinty) * coords->g11 + SQ(coords->Bxy) / coords->g11;
-  coords->g12 = 0.0;
-  coords->g13 = -sinty * coords->g11;
-  coords->g23 = -sbp * Btxy / (hthe * Bpxy * Rxy);
-
-  coords->J = hthe / Bpxy;
-
-  coords->g_11 = 1.0 / coords->g11 + SQ(sinty * Rxy);
-  coords->g_22 = SQ(coords->Bxy * hthe / Bpxy);
-  coords->g_33 = Rxy * Rxy;
-  coords->g_12 = sbp * Btxy * hthe * sinty * Rxy / Bpxy;
-  coords->g_13 = sinty * Rxy * Rxy;
-  coords->g_23 = sbp * Btxy * hthe * Rxy / Bpxy;
-
-  coords->geometry();
+  bout::set_tokamak_coordinates(*mesh, Lnorm, Bnorm, ShiftXderivs);
 }
 
 // just define a macro for V_E dot Grad
@@ -416,7 +370,7 @@ int GBS::rhs(BoutReal t) {
   Gi = 0.0;
   if (ionvis) {
     Field3D tau_i = Omega_ci * tau_i0 * pow(Ti, 1.5) / Ne;
-    Gi = -(0.96 * Ti * Ne * tau_i) * (2. * Grad_par(Vi) + C(phi) / coords->Bxy);
+    Gi = -(0.96 * Ti * Ne * tau_i) * (2. * Grad_par(Vi) + C(phi) / coords->Bxy());
     mesh->communicate(Gi);
     Gi.applyBoundary("neumann");
   } else {
@@ -429,7 +383,8 @@ int GBS::rhs(BoutReal t) {
   Ge = 0.0;
   if (elecvis) {
     Ge = -(0.73 * Te * Ne * tau_e)
-         * (2. * Grad_par(Ve) + (5. * C(Te) + 5. * Te * C(logNe) + C(phi)) / coords->Bxy);
+         * (2. * Grad_par(Ve)
+            + (5. * C(Te) + 5. * Te * C(logNe) + C(phi)) / coords->Bxy());
     mesh->communicate(Ge);
     Ge.applyBoundary("neumann");
   } else {
@@ -443,8 +398,8 @@ int GBS::rhs(BoutReal t) {
 
   if (evolve_Ne) {
     // Density
-    ddt(Ne) = -vE_Grad(Ne, phi)                            // ExB term
-              + (2. / coords->Bxy) * (C(Pe) - Ne * C(phi)) // Perpendicular compression
+    ddt(Ne) = -vE_Grad(Ne, phi)                              // ExB term
+              + (2. / coords->Bxy()) * (C(Pe) - Ne * C(phi)) // Perpendicular compression
               + D(Ne, Dn) + H(Ne, Hn);
 
     if (parallel) {
@@ -461,7 +416,7 @@ int GBS::rhs(BoutReal t) {
   if (evolve_Te) {
     // Electron temperature
     ddt(Te) = -vE_Grad(Te, phi)
-              + (4. / 3.) * (Te / coords->Bxy)
+              + (4. / 3.) * (Te / coords->Bxy())
                     * ((7. / 2.) * C(Te) + (Te / Ne) * C(Ne) - C(phi))
               + D(Te, Dte) + H(Te, Hte);
 
@@ -485,14 +440,14 @@ int GBS::rhs(BoutReal t) {
   if (evolve_Vort) {
     // Vorticity
     ddt(Vort) = -vE_Grad(Vort, phi) // ExB term
-                + 2. * coords->Bxy * C(Pe) / Ne + coords->Bxy * C(Gi) / (3. * Ne)
+                + 2. * coords->Bxy() * C(Pe) / Ne + coords->Bxy() * C(Gi) / (3. * Ne)
                 + D(Vort, Dvort) + H(Vort, Hvort);
 
     if (parallel) {
       Field3D delV = Vi - Ve;
       mesh->communicate(delV);
       ddt(Vort) -= Vpar_Grad_par(Vi, Vort); // Parallel advection
-      ddt(Vort) += SQ(coords->Bxy) * (Grad_par(delV) + (Vi - Ve) * Grad_par(logNe));
+      ddt(Vort) += SQ(coords->Bxy()) * (Grad_par(delV) + (Vi - Ve) * Grad_par(logNe));
     }
   }
 
@@ -528,7 +483,7 @@ const Field3D GBS::C(const Field3D& f) { // Curvature operator
     mesh->communicate(g);
     return bxcv * Grad(g);
   }
-  return coords->Bxy * bracket(logB, f, BRACKET_ARAKAWA);
+  return coords->Bxy() * bracket(logB, f, BRACKET_ARAKAWA);
 }
 
 const Field3D GBS::D(const Field3D& f, BoutReal d) { // Diffusion operator

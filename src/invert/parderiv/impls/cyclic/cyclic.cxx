@@ -1,23 +1,23 @@
 /************************************************************************
  * Inversion of parallel derivatives
- * 
- * Inverts a matrix of the form 
+ *
+ * Inverts a matrix of the form
  *
  * A + B * Grad2_par2 + C*D2DYDZ + + D*D2DZ2 + E*DDY
- * 
+ *
  * Parallel algorithm, using Cyclic Reduction
  *
  * Author: Ben Dudson, University of York, Oct 2011
- * 
+ *
  * Known issues:
  * ------------
  *
  *
  **************************************************************************
- * Copyright 2010 B.D.Dudson, S.Farley, M.V.Umansky, X.Q.Xu
+ * Copyright 2010 - 2026 BOUT++ contributors
  *
- * Contact: Ben Dudson, bd512@york.ac.uk
- * 
+ * Contact: Ben Dudson, dudson2@llnl.gov
+ *
  * This file is part of BOUT++.
  *
  * BOUT++ is free software: you can redistribute it and/or modify
@@ -40,36 +40,42 @@
 
 #if not BOUT_USE_METRIC_3D
 
+#include <bout/assert.hxx>
+#include <bout/bout_types.hxx>
 #include <bout/boutexception.hxx>
 #include <bout/constants.hxx>
+#include <bout/coordinates.hxx>
 #include <bout/cyclic_reduction.hxx>
+#include <bout/dcomplex.hxx>
 #include <bout/derivs.hxx>
 #include <bout/fft.hxx>
+#include <bout/field3d.hxx>
 #include <bout/globals.hxx>
-#include <bout/msg_stack.hxx>
-#include <bout/utils.hxx>
-
+#include <bout/mpi_wrapper.hxx>
 #include <bout/surfaceiter.hxx>
+#include <bout/utils.hxx>
 
 #include <cmath>
 
 InvertParCR::InvertParCR(Options* opt, CELL_LOC location, Mesh* mesh_in)
     : InvertPar(opt, location, mesh_in), A(1.0), B(0.0), C(0.0), D(0.0), E(0.0) {
+
+  bout::fft::assertZSerial(*localmesh, "InvertParCR");
   // Number of k equations to solve for each x location
   nsys = 1 + (localmesh->LocalNz) / 2;
 
-  sg = sqrt(localmesh->getCoordinates(location)->g_22);
+  sg = sqrt(localmesh->getCoordinates(location)->g_22());
   sg = DDY(1. / sg) / sg;
 }
 
 const Field3D InvertParCR::solve(const Field3D& f) {
-  TRACE("InvertParCR::solve(Field3D)");
+
   ASSERT1(localmesh == f.getMesh());
   ASSERT1(location == f.getLocation());
 
   Field3D result = emptyFrom(f).setDirectionY(YDirectionType::Aligned);
 
-  Coordinates* coord = f.getCoordinates();
+  const Coordinates* coord = f.getCoordinates();
 
   Field3D alignedField = toFieldAligned(f, "RGN_NOBNDRY");
 
@@ -160,7 +166,7 @@ const Field3D InvertParCR::solve(const Field3D& f) {
         BoutReal ecoef = E(x, y + local_ystart)
                          + sg(x, y + local_ystart) * B(x, y + local_ystart); // ddy
 
-        if (coord->non_uniform) {
+        if (coord->non_uniform()) {
           ecoef += bcoef * coord->d1_dy(x, y + local_ystart);
         }
 

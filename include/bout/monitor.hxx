@@ -33,7 +33,7 @@ class Monitor {
 public:
   /// A \p timestep_ of -1 defaults to the the frequency of the BOUT++
   /// output monitor
-  Monitor(BoutReal timestep_ = -1) : timestep(timestep_){};
+  Monitor(BoutReal timestep_ = -1) : timestep(timestep_) {};
 
   virtual ~Monitor() = default;
 
@@ -48,7 +48,7 @@ public:
   virtual int call(Solver* solver, BoutReal time, int iter, int nout) = 0;
 
   /// Callback function for when a clean shutdown is initiated
-  virtual void cleanup(){};
+  virtual void cleanup() {};
 
   virtual void outputVars([[maybe_unused]] Options& options,
                           [[maybe_unused]] const std::string& time_dimension) {}

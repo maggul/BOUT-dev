@@ -1,6 +1,10 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+#include <filesystem>
+#include <fstream>
+#include <vector>
+
 #include "bout/boutexception.hxx"
 #include "bout/mesh.hxx"
 #include "bout/output.hxx"
@@ -8,6 +12,7 @@
 
 #include "fake_mesh.hxx"
 #include "test_extras.hxx"
+#include "test_tmpfiles.hxx"
 
 /// Test fixture to make sure the global mesh is our fake one
 class MeshTest : public ::testing::Test {
@@ -20,6 +25,26 @@ public:
 
   WithQuietOutput quiet_warn{output_warn};
 };
+
+class MeshPathResolutionTest : public ::testing::Test {
+public:
+  void TearDown() override { Options::cleanup(); }
+};
+
+namespace {
+class ScopedCurrentPath {
+public:
+  explicit ScopedCurrentPath(const std::filesystem::path& path)
+      : previous_path(std::filesystem::current_path()) {
+    std::filesystem::current_path(path);
+  }
+
+  ~ScopedCurrentPath() { std::filesystem::current_path(previous_path); }
+
+private:
+  std::filesystem::path previous_path;
+};
+} // namespace
 
 TEST_F(MeshTest, CreateDefaultRegions) {
   EXPECT_NO_THROW(localmesh.createDefaultRegions());
@@ -267,6 +292,54 @@ TEST_F(MeshTest, GetField3DNoSource) {
   EXPECT_TRUE(IsFieldEqual(field3d_value, 0.0));
 }
 
+TEST_F(MeshPathResolutionTest, ThrowsIfGridFilePathIsAmbiguous) {
+  bout::testing::TempFile tempdir;
+  const auto base_path = std::filesystem::path(tempdir.string());
+  const auto datadir = base_path / "data";
+  const auto grid_name = "grid.nc";
+
+  std::filesystem::create_directories(datadir);
+  std::ofstream(datadir / grid_name).close();
+  std::ofstream(base_path / grid_name).close();
+
+  ScopedCurrentPath cwd(base_path);
+
+  auto& root = Options::root();
+  root["datadir"] = "data";
+  auto* mesh_options = root.getSection("mesh");
+  (*mesh_options)["file"] = grid_name;
+
+  try {
+    [[maybe_unused]] auto mesh = MeshFactory::getInstance().create(mesh_options);
+    FAIL() << "Expected BoutException";
+  } catch (const BoutException& e) {
+    EXPECT_THAT(std::string(e.what()), ::testing::HasSubstr("Ambiguous grid file path"));
+    EXPECT_THAT(std::string(e.what()), ::testing::HasSubstr("data/grid.nc"));
+    EXPECT_THAT(std::string(e.what()), ::testing::HasSubstr("grid.nc"));
+  }
+}
+
+TEST_F(MeshPathResolutionTest, ThrowsIfGridFileCannotBeFound) {
+  bout::testing::TempFile tempdir;
+  const auto base_path = std::filesystem::path(tempdir.string());
+
+  std::filesystem::create_directories(base_path);
+  ScopedCurrentPath cwd(base_path);
+
+  auto& root = Options::root();
+  root["datadir"] = "data";
+  auto* mesh_options = root.getSection("mesh");
+  (*mesh_options)["file"] = "missing-grid.nc";
+
+  try {
+    [[maybe_unused]] auto mesh = MeshFactory::getInstance().create(mesh_options);
+    FAIL() << "Expected BoutException";
+  } catch (const BoutException& e) {
+    EXPECT_THAT(std::string(e.what()), ::testing::HasSubstr("Could not find grid file"));
+    EXPECT_THAT(std::string(e.what()), ::testing::HasSubstr("missing-grid.nc"));
+  }
+}
+
 TEST_F(MeshTest, GetField3DNoSourceWithDefault) {
   WithQuietOutput warn{output_warn};
 
@@ -288,9 +361,9 @@ TEST_F(MeshTest, MsgLen) {
   Field2D f2D_1(0., &localmesh);
   Field2D f2D_2(0., &localmesh);
 
-  std::vector<FieldData*> var_list{&f3D_1, &f2D_1, &f3D_2, &f2D_2};
+  const std::vector<Field*> var_list{&f3D_1, &f2D_1, &f3D_2, &f2D_2};
 
   const int len = localmesh.msg_len(var_list, 0, nx, 0, ny);
 
-  EXPECT_EQ(len, 2 * (nx * ny * nz) + 2 * (nx * ny));
+  EXPECT_EQ(len, (2 * (nx * ny * nz)) + (2 * (nx * ny)));
 }

@@ -1,13 +1,20 @@
 #ifndef BOUT_GLOBALINDEXER_H
 #define BOUT_GLOBALINDEXER_H
 
+#include <bout/array.hxx>
+#include <bout/assert.hxx>
 #include <bout/bout_types.hxx>
 #include <bout/boutcomm.hxx>
 #include <bout/mesh.hxx>
+#include <bout/mpi_wrapper.hxx>
 #include <bout/operatorstencil.hxx>
 #include <bout/paralleltransform.hxx>
 #include <bout/region.hxx>
 #include <bout/traits.hxx>
+
+#include <memory>
+#include <set>
+#include <vector>
 
 template <class T>
 class GlobalIndexer;
@@ -86,7 +93,7 @@ public:
 
     int localSize = size();
     MPI_Comm comm =
-        std::is_same_v<T, FieldPerp> ? fieldmesh->getXcomm() : BoutComm::get();
+        std::is_same_v<T, FieldPerp> ? fieldmesh->getXZcomm() : BoutComm::get();
     fieldmesh->getMpi().MPI_Scan(&localSize, &globalEnd, 1, MPI_INT, MPI_SUM, comm);
     globalEnd--;
     int counter = globalStart = globalEnd - size() + 1;

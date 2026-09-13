@@ -12,7 +12,7 @@ import contextlib  # corelib
 
 try:
     import packaging.tags  # packaging
-except:
+except ImportError:
     packaging = None
 
 
@@ -33,10 +33,10 @@ def getversion():
         with contextlib.suppress(KeyError):
             # 0. Check whether version is set via environment variable
             version = os.environ["BOUT_PRETEND_VERSION"]
-            return version
+            return version.lstrip("v")
 
-        _bout_previous_version = "v5.1.1"
-        _bout_next_version = "v5.2.0"
+        _bout_previous_version = "v5.2.0"
+        _bout_next_version = "v6.0.0"
 
         try:
             try:
@@ -74,7 +74,7 @@ def getversion():
                 version = _bout_previous_version + ".rc+" + hash
                 with open("_version.txt", "w") as f:
                     f.write(version + "\n")
-    return version
+    return version.lstrip("v")
 
 
 def run(cmd):
@@ -161,7 +161,6 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     )
     run(f"cmake --build  _wheel_build/ -j {os.cpu_count()}")
     run("cmake --install _wheel_build/")
-    distinfo = f"_wheel_install"
     prepare_metadata_for_build_wheel("_wheel_install", record=True)
 
     # Do not add --symlink as python's does not extract that as symlinks
@@ -176,7 +175,7 @@ def build_sdist(sdist_directory, config_settings=None):
     print(config_settings, sdist_directory)
     enable_gz = True
     enable_xz = False
-    external = {"fmt", "mpark.variant"}
+    external = {"fmt", "mpark.variant", "cpptrace"}
     if config_settings is not None:
         global useLocalVersion, pkgname
         for k, v in config_settings.items():
@@ -216,9 +215,16 @@ def build_sdist(sdist_directory, config_settings=None):
             f"""Metadata-Version: 2.1
 Name: {pkgname}
 Version: {getversion()}
-License-File: COPYING
 """
         )
+        with open("LICENSE") as src:
+            pre = "License: "
+            for line in src:
+                f.write(f"{pre}{line}")
+                pre = "         "
+        f.write("Description-Content-Type: text/markdown\n\n")
+        with open("README.md") as src:
+            f.write(src.read())
     run(
         f"tar --append -f {sdist_directory}/{fname} _version.txt --xform='s\\_version.txt\\{prefix}/_version.txt\\'"
     )
@@ -274,7 +280,7 @@ License-File: COPYING
     with open(f"{distinfo}/WHEEL", "w") as f:
         f.write(
             f"""Wheel-Version: 1.0
-Generator: boutpp_custom_build_wheel ({getversion()})
+Generator: boutpp_custom_build_wheel (version {getversion()})
 Root-Is-Purelib: false
 Tag: {gettag()}
 """
@@ -337,11 +343,8 @@ def help():
     """
     table = []
     for k, v in todos.items():
-        try:
-            doc = v.__doc__.strip()
-            doc = " : " + doc
-        except:
-            doc = ""
+        doc = v.__doc__.strip()
+        doc = " : " + doc
         table.append((k, doc))
     maxkey = max([len(k) for k, _ in table])
     fmt = f"   %-{maxkey}s%s"

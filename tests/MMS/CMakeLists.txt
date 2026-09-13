@@ -8,6 +8,7 @@ add_subdirectory(spatial/d2dx2)
 add_subdirectory(spatial/d2dz2)
 add_subdirectory(spatial/diffusion)
 add_subdirectory(spatial/fci)
+add_subdirectory(spatial/finite-volume)
 add_subdirectory(time)
 add_subdirectory(time-petsc)
 add_subdirectory(wave-1d)
@@ -15,7 +16,7 @@ add_subdirectory(wave-1d-y)
 
 ########################################
 # The following require boutpp:
-if (BOUT_ENABLE_PYTHON)
+if(BOUT_ENABLE_PYTHON)
   add_subdirectory(bracket)
   add_subdirectory(derivatives3)
   add_subdirectory(shiftedmetricinterp)
