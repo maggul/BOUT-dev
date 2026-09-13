@@ -1,7 +1,5 @@
 
 #include "bout/parallel_boundary_op.hxx"
-#include "bout/parallel_boundary_region.hxx"
-#include "bout/unused.hxx"
 #include <bout/boundary_factory.hxx>
 #include <bout/field_data.hxx>
 #include <bout/field_factory.hxx>
@@ -189,12 +187,11 @@ void FieldData::addBndryGenerator(FieldGeneratorPtr gen, BndryLoc location) {
 }
 
 FieldGeneratorPtr FieldData::getBndryGenerator(BndryLoc location) {
-  auto it = bndry_generator.find(location);
-  if (it == bndry_generator.end()) {
-    return nullptr;
+  if (const auto it = bndry_generator.find(location); it != bndry_generator.end()) {
+    return it->second;
   }
 
-  return it->second;
+  return nullptr;
 }
 
 Mesh* FieldData::getMesh() const {

@@ -879,6 +879,14 @@ int BoutMonitor::call(Solver* solver, BoutReal t, [[maybe_unused]] int iter, int
     if (solver->splitOperator()) {
       output_progress.write(_("Sim Time  |  RHS_e evals  | RHS_I evals  | Wall Time |  "
                               "Calc    Inv   Comm    I/O   SOLVER\n\n"));
+    } else if (solver->splitOperatorMRI()) {
+      output_progress.write(
+          _("Sim Time  |  RHS_se evals  | RHS_si evals  |  RHS_fe evals  |"
+            "RHS_fi evals  | Wall Time |  "
+            "Calc    Inv   Comm    I/O   SOLVER\n\n"));
+    } else {
+      output_progress.write(_("Sim Time  |  RHS evals  | Wall Time |  Calc    Inv   Comm "
+                              "   I/O   SOLVER\n\n"));
     }
     else if (solver->splitOperatorMRI()) {
       output_progress.write(_("Sim Time  |  RHS_se evals  | RHS_si evals  |  RHS_fe evals  |" 
@@ -1037,18 +1045,24 @@ void RunMetrics::outputVars(Options& output_options) const {
 }
 
 void RunMetrics::calculateDerivedMetrics() {
-  // Terrible hack avoid divide-by-zero, needed because SLEPc solver
-  // doesn't call `run_rhs` which increments `ncalls`. Better fix is
-  // change `Solver::addMonitor` API to take a name so that we can
-  // replace `BoutMonitor` with a different implementation. Currently
-  // not possible because `Solver::removeMonitor` needs the pointer to
-  // the specific instance
-  if (ncalls == 0) {
-    return;
+  wtime_per_rhs = 0.0;
+  wtime_per_rhs_e = 0.0;
+  wtime_per_rhs_i = 0.0;
+
+  const auto total_ncalls =
+      (ncalls > 0) ? ncalls : (ncalls_se + ncalls_si + ncalls_fe + ncalls_fi);
+  const auto explicit_ncalls = (ncalls_e > 0) ? ncalls_e : (ncalls_se + ncalls_fe);
+  const auto implicit_ncalls = (ncalls_i > 0) ? ncalls_i : (ncalls_si + ncalls_fi);
+
+  if (total_ncalls > 0) {
+    wtime_per_rhs = wtime / total_ncalls;
   }
-  wtime_per_rhs = wtime / ncalls;
-  wtime_per_rhs_e = wtime / ncalls_e;
-  wtime_per_rhs_i = wtime / ncalls_i;
+  if (explicit_ncalls > 0) {
+    wtime_per_rhs_e = wtime / explicit_ncalls;
+  }
+  if (implicit_ncalls > 0) {
+    wtime_per_rhs_i = wtime / implicit_ncalls;
+  }
 }
 
 void RunMetrics::writeProgress(BoutReal simtime, bool output_split, bool output_splitmri) {
@@ -1062,6 +1076,25 @@ void RunMetrics::writeProgress(BoutReal simtime, bool output_split, bool output_
                           100. * wtime_io / wtime,     // I/O
                           100. * (wtime - wtime_io - wtime_rhs)
                               / wtime); // Everything else
+  } else if (output_splitmri) {
+    output_progress.write("{:.3e}      {:8d}      {:8d}      {:8d}            {:8d}      "
+                          " {:.2e}   {:5.1f}  "
+                          "{:5.1f}  {:5.1f}  {:5.1f}  {:5.1f}\n",
+                          simtime, ncalls_se, ncalls_si, ncalls_fe, ncalls_fi, wtime,
+                          100. * (wtime_rhs - wtime_comms - wtime_invert) / wtime,
+                          100. * wtime_invert / wtime, // Inversions
+                          100. * wtime_comms / wtime,  // Communications
+                          100. * wtime_io / wtime,     // I/O
+                          100. * (wtime - wtime_io - wtime_rhs)
+                              / wtime); // Everything else
+  } else {
+    output_progress.write(
+        "{:.3e}      {:5d}       {:.2e}   {:5.1f}  {:5.1f}  {:5.1f}  {:5.1f}  {:5.1f}\n",
+        simtime, ncalls, wtime, 100. * (wtime_rhs - wtime_comms - wtime_invert) / wtime,
+        100. * wtime_invert / wtime,                    // Inversions
+        100. * wtime_comms / wtime,                     // Communications
+        100. * wtime_io / wtime,                        // I/O
+        100. * (wtime - wtime_io - wtime_rhs) / wtime); // Everything else
   }
   else if (output_splitmri) {
     output_progress.write("{:.3e}      {:8d}      {:8d}      {:8d}            {:8d}       {:.2e}   {:5.1f}  "

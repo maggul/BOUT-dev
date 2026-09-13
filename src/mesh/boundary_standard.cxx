@@ -1,3 +1,8 @@
+#include "bout/assert.hxx"
+#include "bout/bout_types.hxx"
+#include "bout/field2d.hxx"
+#include "bout/field3d.hxx"
+#include "bout/sys/expressionparser.hxx"
 #include <bout/boundary_standard.hxx>
 #include <bout/boutexception.hxx>
 #include <bout/build_defines.hxx>
@@ -10,6 +15,8 @@
 #include <bout/output.hxx>
 #include <bout/sys/generator_context.hxx>
 #include <bout/utils.hxx>
+#include <list>
+#include <memory>
 
 using bout::generator::Context;
 
@@ -246,6 +253,129 @@ void BoundaryDirichlet_O1::apply_ddt(Field3D& f) {
 
 ///////////////////////////////////////////////////////////////
 
+BoundaryOp* BoundaryDirichlet_O1::clone(BoundaryRegion* region,
+                                        const std::list<std::string>& args) {
+  verifyNumPoints(region, 1);
+
+  std::shared_ptr<FieldGenerator> newgen;
+  if (!args.empty()) {
+    // First argument should be an expression
+    newgen = FieldFactory::get()->parse(args.front());
+  }
+  return new BoundaryDirichlet_O1(region, newgen);
+}
+
+void BoundaryDirichlet_O1::apply(Field2D& f) { BoundaryDirichlet_O1::apply(f, 0.); }
+
+void BoundaryDirichlet_O1::apply(Field2D& f, BoutReal t) {
+  // Set (at 1st order) the value at the grid cell to the guard cells.
+
+  Mesh* mesh = bndry->localmesh;
+  ASSERT1(mesh == f.getMesh());
+  bndry->first();
+
+  // Decide which generator to use
+  std::shared_ptr<FieldGenerator> fg = gen;
+  if (!fg) {
+    fg = f.getBndryGenerator(bndry->location);
+  }
+
+  BoutReal val = 0.0;
+
+  // Check for staggered grids
+
+  CELL_LOC const loc = f.getLocation();
+  if (loc != CELL_CENTRE) {
+    // Staggered
+    throw BoutException("dirichlet_o1 BC is not implementated for staggered grids.");
+
+  } // Non-staggered, standard case
+  for (; !bndry->isDone(); bndry->next1d()) {
+
+    if (fg) {
+      val = fg->generate(Context(bndry, loc, t, mesh));
+    }
+    f(bndry->x, bndry->y) = val;
+
+    // Need to set second guard cell, as may be used for interpolation or upwinding derivatives
+    // This is not very efficient. Both boundary cells can be treated in one loop.
+    for (int i = 1; i < bndry->width; i++) {
+      const int xi = bndry->x + (i * bndry->bx);
+      const int yi = bndry->y + (i * bndry->by);
+      f(xi, yi) = val;
+    }
+  }
+}
+
+void BoundaryDirichlet_O1::apply(Field3D& f) { BoundaryDirichlet_O1::apply(f, 0.); }
+
+void BoundaryDirichlet_O1::apply(Field3D& f, BoutReal t) {
+  // Set (at 1st order) the value at the grid cell to the guard cells.
+
+  Mesh* mesh = bndry->localmesh;
+  ASSERT1(mesh == f.getMesh());
+  bndry->first();
+
+  // Decide which generator to use
+  std::shared_ptr<FieldGenerator> fg = gen;
+  if (!fg) {
+    fg = f.getBndryGenerator(bndry->location);
+  }
+
+  BoutReal val = 0.0;
+
+  // Check for staggered grids
+
+  CELL_LOC const loc = f.getLocation();
+  if (loc != CELL_CENTRE) {
+    // Staggered.
+    throw BoutException("dirichlet_o1 BC is not implementated for staggered grids.");
+
+  } // Standard (non-staggered) case
+  for (; !bndry->isDone(); bndry->next1d()) {
+    for (int zk = mesh->zstart; zk <= mesh->zend; zk++) {
+      if (fg) {
+        val = fg->generate(Context(bndry, zk, loc, t, mesh));
+      }
+      f(bndry->x, bndry->y, zk) = val;
+    }
+
+    // This is not very efficient. Both boundary cells can be treated in one loop.
+    for (int i = 1; i < bndry->width; i++) {
+      // Set any other guard cells using the values on the cells
+      const int xi = bndry->x + (i * bndry->bx);
+      const int yi = bndry->y + (i * bndry->by);
+      for (int zk = mesh->zstart; zk <= mesh->zend; zk++) {
+        if (fg) {
+          val = fg->generate(Context(bndry, zk, loc, t, mesh));
+        }
+        f(xi, yi, zk) = val;
+      }
+    }
+  }
+}
+
+void BoundaryDirichlet_O1::apply_ddt(Field2D& f) {
+  Field2D* dt = f.timeDeriv();
+  for (bndry->first(); !bndry->isDone(); bndry->next()) {
+    (*dt)(bndry->x, bndry->y) = 0.; // Set time derivative to zero
+  }
+}
+
+void BoundaryDirichlet_O1::apply_ddt(Field3D& f) {
+  const Mesh* mesh = bndry->localmesh;
+  ASSERT1(mesh == f.getMesh());
+  Field3D* dt = f.timeDeriv();
+
+  for (bndry->first(); !bndry->isDone(); bndry->next()) {
+    for (int z = mesh->zstart; z <= mesh->zend; z++) {
+      (*dt)(bndry->x, bndry->y, z) = 0.; // Set time derivative to zero
+    }
+  }
+}
+
+///////////////////////////////////////////////////////////////
+
 BoundaryOp* BoundaryDirichlet::clone(BoundaryRegion* region,
                                      const std::list<std::string>& args) {
   verifyNumPoints(region, 1);
@@ -442,7 +572,7 @@ void BoundaryDirichlet::apply(Field3D& f, BoutReal t) {
   // Check for staggered grids
 
   CELL_LOC loc = f.getLocation();
-  if (mesh->StaggerGrids && loc != CELL_CENTRE) {
+  if (loc != CELL_CENTRE) {
     // Staggered. Need to apply slightly differently
 
     if (loc == CELL_XLOW) {
@@ -944,7 +1074,7 @@ void BoundaryDirichlet_O3::apply(Field3D& f, BoutReal t) {
   // Check for staggered grids
 
   CELL_LOC loc = f.getLocation();
-  if (mesh->StaggerGrids && loc != CELL_CENTRE) {
+  if (loc != CELL_CENTRE) {
     // Staggered. Need to apply slightly differently
 
     if (loc == CELL_XLOW) {
@@ -1401,7 +1531,7 @@ void BoundaryDirichlet_O4::apply(Field3D& f, BoutReal t) {
   // Check for staggered grids
 
   CELL_LOC loc = f.getLocation();
-  if (mesh->StaggerGrids && loc != CELL_CENTRE) {
+  if (loc != CELL_CENTRE) {
     // Staggered. Need to apply slightly differently
 
     if (loc == CELL_XLOW) {
@@ -2218,7 +2348,7 @@ void BoundaryNeumann::apply([[maybe_unused]] Field2D& f, [[maybe_unused]] BoutRe
     // Check for staggered grids
 
     CELL_LOC loc = f.getLocation();
-    if (mesh->StaggerGrids && loc != CELL_CENTRE) {
+    if (loc != CELL_CENTRE) {
       // Staggered. Need to apply slightly differently
       // Use one-sided differencing. Cell is now on
       // the boundary, so use one-sided differencing
@@ -2507,7 +2637,7 @@ void BoundaryNeumann::apply([[maybe_unused]] Field2D& f, [[maybe_unused]] BoutRe
 
     // Check for staggered grids
     CELL_LOC loc = f.getLocation();
-    if (mesh->StaggerGrids && loc != CELL_CENTRE) {
+    if (loc != CELL_CENTRE) {
       throw BoutException("neumann_o4 not implemented with staggered grid yet");
     } else {
       // Non-staggered, standard case
@@ -2559,7 +2689,7 @@ void BoundaryNeumann::apply([[maybe_unused]] Field2D& f, [[maybe_unused]] BoutRe
 
     // Check for staggered grids
     CELL_LOC loc = f.getLocation();
-    if (mesh->StaggerGrids && loc != CELL_CENTRE) {
+    if (loc != CELL_CENTRE) {
       throw BoutException("neumann_o4 not implemented with staggered grid yet");
     } else {
       Coordinates* coords = f.getCoordinates();
@@ -2922,8 +3052,8 @@ void BoundaryNeumann::apply([[maybe_unused]] Field2D& f, [[maybe_unused]] BoutRe
       rfft(f(x - 2 * bx, y), mesh->LocalNz, c1.begin());
       c1[0] = c0[0] - c1[0]; // Only need gradient
 
-      // Solve  metric->g11*d2f/dx2 - metric->g33*kz^2f = 0
-      // Assume metric->g11, metric->g33 constant -> exponential growth or decay
+      // Solve  metric->g11()*d2f/dx2 - metric->g33()*kz^2f = 0
+      // Assume metric->g11(), metric->g33() constant -> exponential growth or decay
 
       // Loop in X towards edge of domain
       do {
@@ -3139,8 +3269,8 @@ void BoundaryNeumann::apply([[maybe_unused]] Field2D& f, [[maybe_unused]] BoutRe
           c1[jz] = la * c2[jz] + lb * c1[jz] + lc * c0[jz];
         }
       }
-      // Solve  metric->g11*d2f/dx2 - metric->g33*kz^2f = 0
-      // Assume metric->g11, metric->g33 constant -> exponential growth or decay
+      // Solve  metric->g11()*d2f/dx2 - metric->g33()*kz^2f = 0
+      // Assume metric->g11(), metric->g33() constant -> exponential growth or decay
       BoutReal xpos = 0.0;
       // Loop in X towards edge of domain
       do {
@@ -3237,7 +3367,7 @@ void BoundaryNeumann::apply([[maybe_unused]] Field2D& f, [[maybe_unused]] BoutRe
           var.z(jx + 1, jy, jz) = var.z(jx - 3, jy, jz) + 4. * metric->dx(jx, jy) * tmp;
         }
 
-        // d/dx( Jmetric->g11 B_x ) = - d/dx( Jmetric->g12 B_y + Jmetric->g13 B_z)
+        // d/dx( Jmetric->g11() B_x ) = - d/dx( Jmetric->g12() B_y + Jmetric->g13() B_z)
         //                    - d/dy( JB^y ) - d/dz( JB^z )
 
         tmp =

@@ -1,8 +1,6 @@
 /**************************************************************************
  * Interface to SUNDIALS CVODE
  *
- * NOTE: Only one solver can currently be compiled in
- *
  **************************************************************************
  * Copyright 2010 - 2026 BOUT++ contributors
  *
@@ -43,13 +41,14 @@ RegisterUnavailableSolver
 #else
 
 #include "../../sundials_nvector_interface.hxx"
+#include "../arkode/temporal_filtering.hxx"
 #include "bout/bout_types.hxx"
+#include "bout/petsc_preconditioner.hxx"
 #include "bout/region.hxx"
 #include "bout/sundials_backports.hxx"
 #include "../arkode/temporal_filtering.hxx"
 
 #if BOUT_HAS_PETSC
-#include "bout/petsc_preconditioner.hxx"
 #include "bout/petsclib.hxx"
 
 #include <petscksp.h>
@@ -69,6 +68,10 @@ RegisterSolver<CvodeSolver> registersolvercvode("cvode");
 // Preconditioner selection for CVODE.
 // Note: String comparisons are case-insensitive so "Auto" avoids conflict with keyword
 BOUT_ENUM_CLASS(CvodePreconMethod, none, Auto, user, petsc, bbd);
+BOUT_ENUM_CLASS_NS(bout, CvodeJacobianExportTrigger,
+                   output,      ///< Export once per solver output timestep
+                   linear_setup ///< Export whenever CVODE rebuilds linear solver data
+);
 
 #if SUNDIALS_VERSION_AT_LEAST(6, 0, 0)
 using CvodeBool = sunbooleantype;
@@ -99,12 +102,24 @@ public:
 
 private:
 #if BOUT_HAS_PETSC
+  /// PETSc callback for the CVODE system function ``x - gamma * rhs(t, x)``.
   static PetscErrorCode petscFormFunction(void* dummy, Vec x, Vec f, void* ctx);
+  /// PETSc callback for the raw CVODE RHS ``rhs(t, x)`` with ``linear=true``.
+  static PetscErrorCode petscFormRhsFunction(void* dummy, Vec x, Vec f, void* ctx);
   static int petscPSetup(BoutReal t, N_Vector yy, N_Vector yp, CvodeBool jok,
                          CvodeBool* jcurPtr, BoutReal gamma, void* user_data);
   static int petscPSolve(BoutReal t, N_Vector yy, N_Vector yp, N_Vector rvec,
                          N_Vector zvec, BoutReal gamma, BoutReal delta, int lr,
                          void* user_data);
+  /// Write one Jacobian matrix and the shared metadata JSON.
+  void exportMatrixAndMetadata(bout::JacobianExportKind kind, Mat jacobian);
+  /// Build and save a diagnostic Jacobian of the requested kind.
+  void saveDiagnosticJacobian(bout::JacobianExportKind kind, Vec x, BoutReal t,
+                              BoutReal gamma);
+  /// Save Jacobians during CVODE linear solver setup callbacks.
+  void maybeExportJacobian(Mat system_jacobian, Vec x, BoutReal t, BoutReal gamma);
+  /// Save Jacobians once per solver output timestep.
+  void maybeExportOutputJacobian(BoutReal t);
 #endif
 
   BoutReal hcur; //< Current internal timestep
@@ -209,7 +224,7 @@ private:
   sundials::Context suncontext;
 
 #if BOUT_HAS_PETSC
-  // PETSc-coloring-based preconditioning for CVODE
+  // PETSc-coloring-based preconditioning and Jacobian diagnostics for CVODE
   std::unique_ptr<PetscLib> petsc_lib;
   PetscPreconditioner petsc_preconditioner;
   KSP petsc_ksp{nullptr};

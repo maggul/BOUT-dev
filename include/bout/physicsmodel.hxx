@@ -3,17 +3,10 @@
  *
  * @brief Base class for Physics Models
  *
- *
- *
- * Changelog:
- *
- * 2013-08 Ben Dudson <benjamin.dudson@york.ac.uk>
- *    * Initial version
- *
  **************************************************************************
  * Copyright 2013-2025 BOUT++ contributors
  *
- * Contact: Ben Dudson, bd512@york.ac.uk
+ * Contact: Ben Dudson, dudson2@llnl.gov
  *
  * This file is part of BOUT++.
  *

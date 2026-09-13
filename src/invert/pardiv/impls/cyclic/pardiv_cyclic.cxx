@@ -40,12 +40,16 @@
 
 #if not BOUT_USE_METRIC_3D
 
+#include <bout/assert.hxx>
 #include <bout/boutexception.hxx>
 #include <bout/constants.hxx>
+#include <bout/coordinates.hxx>
 #include <bout/cyclic_reduction.hxx>
 #include <bout/derivs.hxx>
 #include <bout/fft.hxx>
+#include <bout/field3d.hxx>
 #include <bout/globals.hxx>
+#include <bout/mpi_wrapper.hxx>
 #include <bout/surfaceiter.hxx>
 #include <bout/utils.hxx>
 
@@ -65,7 +69,7 @@ Field3D InvertParDivCR::solve(const Field3D& f) {
 
   Field3D result = emptyFrom(f).setDirectionY(YDirectionType::Aligned);
 
-  Coordinates* coord = f.getCoordinates();
+  const Coordinates* coord = f.getCoordinates();
 
   Field3D alignedField = toFieldAligned(f, "RGN_NOBNDRY");
 
@@ -104,9 +108,9 @@ Field3D InvertParDivCR::solve(const Field3D& f) {
   auto b = Matrix<dcomplex>(nsys, size);
   auto c = Matrix<dcomplex>(nsys, size);
 
-  const Field2D dy = coord->dy;
-  const Field2D J = coord->J;
-  const Field2D g_22 = coord->g_22;
+  const Field2D dy = coord->dy();
+  const Field2D J = coord->J();
+  const Field2D g_22 = coord->g_22();
 
   const auto zlength = getUniform(coord->zlength());
   // Loop over flux-surfaces
