@@ -173,32 +173,21 @@ CvodeSolver::CvodeSolver(Options* opts)
                          .doc("Print all integrator stats at each evolve call")
                          .withDefault(false)),
       use_temporal_filtering((*options)["use_temporal_filtering"]
-                                 .doc("Use temporal filtering of solution")
-                                 .withDefault(false)),
+                             .doc("Use temporal filtering of solution")
+                             .withDefault(false)),
       temp_filtering(),
       filtering_type((*options)["filtering_type"]
-                         .doc("Type of temporal filtering to perform: None, EMA, SRA")
-                         .withDefault(FilteringType::EMA)),
+                     .doc("Type of temporal filtering to perform: None, EMA, SRA")
+                     .withDefault(FilteringType::EMA)),
       tau_mean((*options)["tau_mean"]
-                   .doc("Interval over which means are calculated")
-                   .withDefault(10.0)),
+                .doc("Interval over which means are calculated")
+                .withDefault(10.0)),
       mean_start_time((*options)["mean_start_time"]
-                          .doc("Time at which averaging is allowed to start")
-                          .withDefault(0.0)),
+                      .doc("Time at which averaging is allowed to start")
+                      .withDefault(0.0)),
       lambda((*options)["lambda"]
-                 .doc("Relaxation parameter for temporal filtering")
-                 .withDefault(0.01)),
-      save_jacobian((*options)["save_jacobian"]
-                        .doc("Save PETSc Jacobian diagnostics to datadir")
-                        .withDefault(false)),
-      jacobian_export_kind((*options)["jacobian_export_kind"]
-                               .doc("Which Jacobian to save for CVODE: system or rhs "
-                                    "(scaled is not supported)")
-                               .withDefault(bout::JacobianExportKind::system)),
-      jacobian_export_trigger(
-          (*options)["jacobian_export_trigger"]
-              .doc("When to save CVODE Jacobians: output or linear_setup")
-              .withDefault(bout::CvodeJacobianExportTrigger::linear_setup)),
+             .doc("Relaxation parameter for temporal filtering")
+             .withDefault(0.01)),
 
       suncontext(createSUNContext(BoutComm::get())) {
   has_constraints = false; // This solver doesn't have constraints
@@ -912,21 +901,12 @@ BoutReal CvodeSolver::run(BoutReal tout) {
       flag = CVodePrintAllStats(cvode_mem, stdout, SUN_OUTPUTFORMAT_TABLE);
       if (flag != CV_SUCCESS) {
         throw BoutException("ERROR CVodePrintAllStats failed with flag = {:d}\n", flag);
-      }
+        }
     }
   }
 
   // Copy variables
   backend.copy_state_from_vector(uvec);
-
-  if (flag < 0) {
-    throw BoutException("ERROR CVODE solve failed at t = {:e}, flag = {:d}\n", simtime,
-                        flag);
-  }
-
-#if BOUT_HAS_PETSC
-  maybeExportOutputJacobian(simtime);
-#endif
 
   // Call rhs function to get extra variables at this time
   run_rhs(simtime);
@@ -1264,12 +1244,14 @@ void CvodeSolver::resetInternalFields() {
   }
 }
 
-void CvodeSolver::apply_temporal_filtering(BoutReal internal_time, N_Vector uvec) {
+void CvodeSolver::apply_temporal_filtering(BoutReal internal_time,
+                                            N_Vector uvec)
+{
   if (!use_temporal_filtering) {
     return;
   }
 
-  // Update the temporal filtering
+  // Update the temporal filtering 
   temp_filtering.update(internal_time, uvec);
 
   // If no mean is available yet, do nothing
@@ -1278,7 +1260,7 @@ void CvodeSolver::apply_temporal_filtering(BoutReal internal_time, N_Vector uvec
   }
 
   int flag;
-
+    
   // Get the current mean vector
   N_Vector u_mean = temp_filtering.get_mean_vector();
 
@@ -1300,4 +1282,5 @@ void CvodeSolver::apply_temporal_filtering(BoutReal internal_time, N_Vector uvec
     temp_filtering.restart_window(internal_time);
   }
 }
+
 #endif

@@ -221,7 +221,7 @@ public:
   int runPrecon(BoutReal t, BoutReal gamma, BoutReal delta);
   int runPreconFast(BoutReal t, BoutReal gamma, BoutReal delta);
   int runPreconSlow(BoutReal t, BoutReal gamma, BoutReal delta);
-
+  
   /*!
    * True if a Jacobian function has been defined
    */

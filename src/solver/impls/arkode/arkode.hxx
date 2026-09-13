@@ -210,6 +210,7 @@ private:
   BoutReal mean_start_time{0.0};
   /// Relaxation/nudging parameter for temporal filtering
   BoutReal lambda{0.0};
+
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
   /// Use ARKode optimal parameters
   bool optimize;
@@ -232,6 +233,7 @@ private:
   SundialsNVectorInterface nvector_backend() {
     return SundialsNVectorInterface(*this, suncontext, nvector_type);
   }
+
   void apply_temporal_filtering(BoutReal internal_time, N_Vector uvec);
   /// SPGMR solver structure
   SUNLinearSolver sun_solver{nullptr};

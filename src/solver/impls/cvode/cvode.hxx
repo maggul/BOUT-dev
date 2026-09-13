@@ -46,6 +46,7 @@ RegisterUnavailableSolver
 #include "bout/petsc_preconditioner.hxx"
 #include "bout/region.hxx"
 #include "bout/sundials_backports.hxx"
+#include "../arkode/temporal_filtering.hxx"
 
 #if BOUT_HAS_PETSC
 #include "bout/petsclib.hxx"
@@ -192,11 +193,6 @@ private:
   BoutReal mean_start_time{0.0};
   /// Relaxation/nudging parameter for temporal filtering
   BoutReal lambda{0.0};
-  bool save_jacobian; ///< Save PETSc Jacobian diagnostics to ``datadir``?
-  bout::JacobianExportKind
-      jacobian_export_kind; ///< Export ``system`` or ``rhs`` Jacobian
-  bout::CvodeJacobianExportTrigger
-      jacobian_export_trigger; ///< Export on ``output`` or ``linear_setup``
 
   // Diagnostics from CVODE
   int nsteps{0};
@@ -218,6 +214,7 @@ private:
   SundialsNVectorInterface nvector_backend() {
     return SundialsNVectorInterface(*this, suncontext, nvector_type);
   }
+
   void apply_temporal_filtering(BoutReal internal_time, N_Vector uvec);
   /// SPGMR solver structure
   SUNLinearSolver sun_solver{nullptr};

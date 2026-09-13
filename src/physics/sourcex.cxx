@@ -74,6 +74,27 @@ const Field3D sink_tanhx(const Field2D& UNUSED(f0), const Field3D& f, BoutReal s
 }
 
 // create radial buffer zones to set jpar zero near radial boundaries
+const Field2D sink_tanhx(const Field2D& f, BoutReal swidth,
+                         BoutReal slength, bool UNUSED(BoutRealspace)) {
+  Mesh* localmesh = f.getMesh();
+
+  Field2D result{emptyFrom(f)};
+
+  // create a radial buffer zone to set jpar zero near radial boundary
+  BOUT_FOR(i, result.getRegion("RGN_ALL")) {
+    BoutReal rlx = 1. - localmesh->GlobalX(i.x()) - slength;
+    BoutReal dampr = TanH(rlx / swidth);
+    result[i] = 0.5 * (1.0 - dampr);
+  }
+    
+  // Need to communicate boundaries
+  localmesh->communicate(result);
+  
+  return result;
+} 
+
+
+// create radial buffer zones to set jpar zero near radial boundaries
 const Field3D mask_x(const Field3D& f, bool UNUSED(BoutRealspace)) {
 
   Mesh* localmesh = f.getMesh();

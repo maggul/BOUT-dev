@@ -566,7 +566,7 @@ int ArkodeSolver::init() {
   // between consecutive steps in the integration process.
    if (ARKodeSetMaxGrowth(arkode_mem, mx_growth) != ARK_SUCCESS) {
      throw BoutException("ARKodeSetMaxGrowth failed\n");
-   }
+  }
 
 #if ARKODE_OPTIMAL_PARAMS_SUPPORT
   if (optimize) {

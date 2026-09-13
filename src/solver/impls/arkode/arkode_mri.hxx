@@ -1,6 +1,6 @@
 /**************************************************************************
  * Interface to ARKODE MRI solver
- * NOTE: ARKode is currently in beta testing so use with cautious optimism
+ * NOTE: ARKODE is currently in beta testing so use with cautious optimism
  *
  * NOTE: Only one solver can currently be compiled in
  *
@@ -36,20 +36,19 @@
 
 namespace {
 RegisterUnavailableSolver
-    registerunavailablearkodemri("arkode_mri",
-                                 "BOUT++ was not configured with ARKODE/SUNDIALS");
+    registerunavailablearkodemri("arkode_mri", "BOUT++ was not configured with ARKODE/SUNDIALS");
 }
 
 #else
 
-#include "temporal_filtering.hxx"
 #include "bout/sundials_backports.hxx"
+#include "temporal_filtering.hxx"
 
 #if SUNDIALS_VERSION_LESS_THAN(7, 2, 0)
 
 namespace {
-RegisterUnavailableSolver registerunavailablearkodemri(
-    "arkode_mri", "BOUT++ configured with ARKODE/SUNDIALS version less than 7.2.0");
+RegisterUnavailableSolver
+    registerunavailablearkodemri("arkode_mri", "BOUT++ configured with ARKODE/SUNDIALS version less than 7.2.0");
 }
 
 #else // SUNDIALS_VERSION check
@@ -57,10 +56,9 @@ RegisterUnavailableSolver registerunavailablearkodemri(
 #include "bout/bout_enum_class.hxx"
 #include "bout/bout_types.hxx"
 #include "bout/region.hxx"
-#include <arkode/arkode_mristep.h>
 #include <nvector/nvector_parallel.h>
+#include <arkode/arkode_mristep.h>
 #include <sundials/sundials_config.h>
-
 #include <vector>
 
 class ArkodeMRISolver;
@@ -95,18 +93,18 @@ public:
   void rhs_s(BoutReal t, BoutReal* udata, BoutReal* dudata);
   void rhs_f(BoutReal t, BoutReal* udata, BoutReal* dudata);
   void pre_s(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal* udata, BoutReal* rvec,
-             BoutReal* zvec);
+           BoutReal* zvec);
   void pre_f(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal* udata, BoutReal* rvec,
-             BoutReal* zvec);
+           BoutReal* zvec);
   void jac_s(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutReal* Jvdata);
   void jac_f(BoutReal t, BoutReal* ydata, BoutReal* vdata, BoutReal* Jvdata);
 
 private:
   bool diagnose{false}; //< Output additional diagnostics
 
-  N_Vector uvec{nullptr};                     //< Values
-  void* arkode_mem{nullptr};                  //< ARKODE internal memory block
-  void* inner_arkode_mem{nullptr};            //< ARKODE internal memory block
+  N_Vector uvec{nullptr};    //< Values
+  void* arkode_mem{nullptr}; //< ARKODE internal memory block
+  void* inner_arkode_mem{nullptr}; //< ARKODE internal memory block
   MRIStepInnerStepper inner_stepper{nullptr}; //< inner stepper
 
   BoutReal pre_Wtime_s{0.0}; //< Time in preconditioner
@@ -195,3 +193,4 @@ private:
 #endif // SUNDIALS_VERSION CHECK
 #endif // BOUT_HAS_ARKODE
 #endif // BOUT_ARKODE_MRI_SOLVER_H
+
