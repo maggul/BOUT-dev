@@ -421,7 +421,7 @@ void Solver::constraint(Field2D& v, Field2D& C_v, std::string name) {
   }
 #endif
 
-  if (!has_constraints) {
+  if (!supports_constraints) {
     throw BoutException("ERROR: This solver doesn't support constraints\n");
   }
 
@@ -452,7 +452,7 @@ void Solver::constraint(Field3D& v, Field3D& C_v, std::string name) {
   }
 #endif
 
-  if (!has_constraints) {
+  if (!supports_constraints) {
     throw BoutException("ERROR: This solver doesn't support constraints\n");
   }
 
@@ -484,7 +484,7 @@ void Solver::constraint(Vector2D& v, Vector2D& C_v, std::string name) {
   }
 #endif
 
-  if (!has_constraints) {
+  if (!supports_constraints) {
     throw BoutException("ERROR: This solver doesn't support constraints\n");
   }
 
@@ -527,7 +527,7 @@ void Solver::constraint(Vector3D& v, Vector3D& C_v, std::string name) {
   }
 #endif
 
-  if (!has_constraints) {
+  if (!supports_constraints) {
     throw BoutException("ERROR: This solver doesn't support constraints\n");
   }
 
